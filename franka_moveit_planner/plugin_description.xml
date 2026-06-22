@@ -1,0 +1,7 @@
+<library path="task_planner">
+  <class name="task_planner/TaskPlannerManager"
+         type="task_planner::TaskPlannerManager"
+         base_class_type="planning_interface::PlannerManager">
+    <description>Task Planner</description>
+  </class>
+</library>
