@@ -35,7 +35,19 @@ ament_target_dependencies(
   "franka_msgs"
 )
 
-install(TARGETS safety_mtc modular_mtc
+add_executable(claude src/claude.cpp)
+target_include_directories(claude PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(claude PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+ament_target_dependencies(
+  claude
+  "moveit_task_constructor_core"
+  "rclcpp"
+  "franka_msgs"
+)
+
+install(TARGETS safety_mtc modular_mtc claude
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
