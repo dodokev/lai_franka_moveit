@@ -1,0 +1,95 @@
+self_filter:
+  ros__parameters:
+
+    # =========================
+    # Frames
+    # =========================
+    sensor_frame: ""
+
+    # For spheres (single scale & padding)
+    default_sphere_scale: 1.0
+    default_sphere_padding: 0.01
+
+    # For boxes (x,y,z scale & padding)
+    default_box_scale: [1.0, 1.0, 1.0]
+    default_box_padding: [0.01, 0.01, 0.01]
+
+    # For cylinders (radial scale, vertical scale, radial padding, vertical padding)
+    default_cylinder_scale: [1.0, 1.0]
+    default_cylinder_padding: [0.01, 0.01]
+
+    # =========================
+    # Point cloud behavior
+    # =========================
+    keep_organized: false
+    zero_for_removed_points: false
+    invert: false
+    # =========================
+    # Robot links (Franka Panda)
+    # =========================
+    self_see_links:
+      names:
+        - panda_link0
+        - panda_link1
+        - panda_link2
+        - panda_link3
+        - panda_link4
+        - panda_link5
+        # - panda_link6
+        - panda_link7
+        - panda_hand
+        # - panda_leftfinger
+        # - panda_rightfinger
+        # - panda_tool
+
+      # =========================
+      # Custom tuning per link
+      # =========================
+
+      panda_link0:
+        cylinder_scale: [1.4, 2.0]
+        cylinder_padding: [0.02, 0.02]
+
+      panda_link1:
+        cylinder_scale: [0.7, 2.0]
+        cylinder_padding: [0.02, 0.02]
+
+      panda_link2:
+        cylinder_scale: [0.6, 2.2]
+        cylinder_padding: [0.02, 0.02]
+
+      panda_link3:
+        cylinder_scale: [0.7, 2.5]
+        cylinder_padding: [0.02, 0.02]
+
+      panda_link4:
+        cylinder_scale: [0.6, 1.9]
+        cylinder_padding: [0.02, 0.02]
+
+      panda_link5:
+        cylinder_scale: [1.3, 4.0]
+        cylinder_padding: [0.02, 0.02]
+
+      # panda_link6:
+      #   cylinder_scale: [1.0, 1.0]
+      #   cylinder_padding: [0.02, 0.02]
+
+      panda_link7:
+        cylinder_scale: [0.5, 1.3]
+        cylinder_padding: [0.02, 0.02]
+
+      panda_hand:
+        box_scale: [0.6, 2.0, 1.5]
+        box_padding: [0.015, 0.015, 0.015]
+
+      # panda_leftfinger:
+      #   sphere_scale: 1.0
+      #   sphere_padding: 0.01
+
+      # panda_rightfinger:
+      #   sphere_scale: 1.0
+      #   sphere_padding: 0.01
+
+      # panda_tool:
+      #   sphere_scale: 1.0
+      #   sphere_padding: 0.01

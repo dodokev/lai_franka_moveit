@@ -11,18 +11,6 @@ find_package(moveit_task_constructor_core REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(franka_msgs REQUIRED)
 
-add_executable(mtc_node src/mtc_node.cpp)
-target_include_directories(mtc_node PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(mtc_node PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-ament_target_dependencies(
-  mtc_node
-  "moveit_task_constructor_core"
-  "rclcpp"
-  "franka_msgs"
-)
-
 add_executable(safety_mtc src/safety_mtc.cpp)
 target_include_directories(safety_mtc PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -35,18 +23,19 @@ ament_target_dependencies(
   "franka_msgs"
 )
 
-add_executable(pick_only src/pick_only.cpp)
-target_include_directories(pick_only PUBLIC
+add_executable(modular_mtc src/modular_mtc.cpp)
+target_include_directories(modular_mtc PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_compile_features(pick_only PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(modular_mtc PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 ament_target_dependencies(
-  pick_only
+  modular_mtc
   "moveit_task_constructor_core"
   "rclcpp"
   "franka_msgs"
 )
-install(TARGETS mtc_node safety_mtc pick_only
+
+install(TARGETS safety_mtc modular_mtc
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

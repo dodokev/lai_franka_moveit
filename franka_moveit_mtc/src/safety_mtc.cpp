@@ -211,9 +211,9 @@ mtc::Task MTCTaskNode::createTask()
 
   auto multi_planner = std::make_shared<mtc::solvers::MultiPlanner>();
   multi_planner->push_back(cart_planner);
-  // multi_planner->push_back(pilz_planner);
-  // multi_planner->push_back(star_planner);
-  // multi_planner->push_back(connect_planner);
+  multi_planner->push_back(pilz_planner);
+  multi_planner->push_back(star_planner);
+  multi_planner->push_back(connect_planner);
 
   for (const auto& planner : *multi_planner) {
   RCLCPP_INFO(LOGGER, "planner id = %s",
@@ -323,7 +323,8 @@ mtc::Task MTCTaskNode::createTask()
     auto stage_move_to_pick = std::make_unique<mtc::stages::Connect>("move to pick", mtc::stages::Connect::GroupPlannerVector{{arm_group_name, multi_planner}});
     // stage_move_to_pick->setTimeout(5.0);
     stage_move_to_pick->properties().configureInitFrom(mtc::Stage::PARENT);
-    
+    stage_move_to_pick->setCostTerm(std::make_shared<mtc::cost::LinkMotion>("fr3_hand_tcp"));
+
     auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("filter pick", std::move(stage_move_to_pick));
     wrapper->setPredicate(security_collision);
 
@@ -605,7 +606,8 @@ mtc::Task MTCTaskNode::createTask()
     auto stage_move_to_place = std::make_unique<mtc::stages::Connect>("move to place", mtc::stages::Connect::GroupPlannerVector{{arm_group_name, multi_planner}});
     // stage_move_to_place->setTimeout(5.0);
     stage_move_to_place->properties().configureInitFrom(mtc::Stage::PARENT);
-
+    stage_move_to_place->setCostTerm(std::make_shared<mtc::cost::LinkMotion>("fr3_hand_tcp"));
+    
     auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("filter pick", std::move(stage_move_to_place));
     wrapper->setPredicate(security_collision);
 
@@ -722,6 +724,7 @@ mtc::Task MTCTaskNode::createTask()
 
     auto stage = std::make_unique<mtc::stages::MoveTo>("return home", multi_planner);
     stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+    stage->setCostTerm(std::make_shared<mtc::cost::LinkMotion>("fr3_hand_tcp"));
     stage->setGoal("ready");
     task.add(std::move(stage));
   }
