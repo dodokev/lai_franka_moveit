@@ -56,10 +56,12 @@ private:
     void cloudCallback(sensor_msgs::msg::PointCloud2::SharedPtr msg);
     void updateOctomap();
     void decayStep();
+    void removeOld();
 
     double decay_time_ = 2.0;
     double decay_rate_ = 0.3;
     const float resolution_ = 0.02f;
+    rclcpp::Time last_time_;
 
     std::unordered_map<VoxelKey, VoxelInfo, VoxelHash> map_;
 

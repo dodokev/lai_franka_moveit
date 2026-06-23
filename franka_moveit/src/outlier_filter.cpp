@@ -9,6 +9,9 @@ OutlierFilter::OutlierFilter()
     sub_unfilter = this->create_subscription<sensor_msgs::msg::PointCloud2>("/points_filtered_world", rclcpp::SensorDataQoS(), std::bind(&OutlierFilter::filter_callback, this, std::placeholders::_1));
     pub_filtered = this->create_publisher<sensor_msgs::msg::PointCloud2>("/points_used", rclcpp::SensorDataQoS());
 
+    table_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+    object_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+
     cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     cropped_Xaxis = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
     cropped_Yaxis = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
@@ -17,18 +20,76 @@ OutlierFilter::OutlierFilter()
     tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
 
     pass_Xaxis.setFilterFieldName("x");
-    pass_Xaxis.setFilterLimits(-1.0, 1.0); // TUNE
+    pass_Xaxis.setFilterLimits(-0.5, 1.0); // TUNE
     pass_Yaxis.setFilterFieldName("y");
     pass_Yaxis.setFilterLimits(-1.0, 1.0); // TUNE
     pass_Zaxis.setFilterFieldName("z");
     pass_Zaxis.setFilterLimits(0, 1.0); // TUNE
 
-    vg_.setLeafSize(0.02f, 0.02f, 0.02f); // TUNE
+    const float voxel_size = 0.02f;
 
-    ec_.setClusterTolerance(0.1); // TUNE
-    ec_.setMinClusterSize(200); // TUNE
+    vg_.setLeafSize(voxel_size, voxel_size, voxel_size); // TUNE
 
-    min_keep_size_ = 200; // TUNE
+    ec_.setClusterTolerance(0.025); // TUNE
+
+    min_keep_size_ = 50; // TUNE
+    ec_.setMinClusterSize(min_keep_size_);
+
+}
+
+void OutlierFilter::planeFitting(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
+{
+    pcl::SACSegmentation<pcl::PointXYZ> _seg;
+    _seg.setOptimizeCoefficients(true);
+    _seg.setModelType(pcl::SACMODEL_PLANE);
+    _seg.setMethodType(pcl::SAC_RANSAC);
+    _seg.setDistanceThreshold(0.025);
+    _seg.setInputCloud(cloud);
+
+    Eigen::Vector3f z(0, 0, 1);
+    _seg.setAxis(z);
+    _seg.setEpsAngle(1e-6);
+
+    pcl::PointIndices::Ptr _inliers(new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr _coefficients(new pcl::ModelCoefficients);
+    _seg.segment(*_inliers, *_coefficients);
+
+    double a = _coefficients->values[0];
+    double b = _coefficients->values[1];
+    double c = _coefficients->values[2];
+    double d = _coefficients->values[3];
+
+    pcl::ExtractIndices<pcl::PointXYZ> _extract;
+    _extract.setInputCloud(cloud);
+    _extract.setIndices(_inliers);
+
+    _extract.setNegative(false);
+    _extract.filter(*table_);
+
+    _extract.setNegative(true);
+    _extract.filter(*object_);
+
+    Eigen::Vector3f n(a, b, c);
+    float norm_sq = n.squaredNorm();
+
+    for (auto& pt : table_->points)
+    {
+        Eigen::Vector3f p(pt.x, pt.y, pt.z);
+
+        float dist = (a * pt.x + b * pt.y + c * pt.z + d) / norm_sq;
+        Eigen::Vector3f p_proj = p - dist * n;
+
+        pt.x = p_proj.x();
+        pt.y = p_proj.y();
+        pt.z = p_proj.z();
+    }
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tmp_cld(new pcl::PointCloud<pcl::PointXYZ>(*table_));
+    vg_.setInputCloud(tmp_cld);
+    vg_.filter(*table_);
+
+    for (auto& pt : table_->points)
+        pt.z -= 0.025;
 }
 
 void OutlierFilter::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg)
@@ -45,7 +106,11 @@ void OutlierFilter::filter_callback(const sensor_msgs::msg::PointCloud2::SharedP
     pass_Zaxis.setInputCloud(cropped_Yaxis);
     pass_Zaxis.filter(*cropped_Zaxis);
 
-    vg_.setInputCloud(cropped_Zaxis);
+    planeFitting(cropped_Zaxis);
+    // *object_ += *table_;
+
+    vg_.setInputCloud(object_);
+    // vg_.setInputCloud(cropped_Zaxis);
     vg_.filter(*downsampled_);
 
     tree_->setInputCloud(downsampled_);
@@ -67,6 +132,8 @@ void OutlierFilter::filter_callback(const sensor_msgs::msg::PointCloud2::SharedP
                 filtered->points.push_back(downsampled_->points[idx]);
             }
     }
+
+    *filtered += *table_;
 
     filtered->width = filtered->points.size();
     filtered->height = 1;

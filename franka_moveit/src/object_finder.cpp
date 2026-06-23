@@ -15,6 +15,8 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
 
   pub_centroid_ = this->create_publisher<visualization_msgs::msg::Marker>("/centroid", 10);
 
+  result_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+
   table_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   object_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
@@ -27,27 +29,54 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
   boost::split(_param_split, _param, boost::is_any_of(","));
   for (const auto& _p : _param_split)
     object_size_.push_back(std::stof(_p));
+  
+  /**
+   * CHANGE THIS TO A SERVICE CLASS - GET STRING - CUTIT - PUSHBACK DIM = NEW OBJECT TO FIND
+   * result_cloud change, more vectors
+   */
 
   type_object_ = static_cast<SHAPE>(object_size_.size());
   // BUG FIX: cast to enum so switch/comparison is type-safe
+  
+  timer_ = create_wall_timer(
+        std::chrono::milliseconds(10),
+        std::bind(&ObjectFinder::update, this));
+}
+
+void ObjectFinder::update()
+{
+  createObstacle(pose_);
+
+  // RCLCPP_DEBUG(LOGGER, "Cloud send");
+  // ── Publish the detected object cloud ────────────────────────────────
+  sensor_msgs::msg::PointCloud2 _output;
+  pcl::toROSMsg(*result_cloud_, _output);
+  // pcl::toROSMsg(*object_, _output);
+  // pcl::toROSMsg(*table_, _output);
+  _output.header = header_;
+  pub_filtered_->publish(_output);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 void ObjectFinder::retreiveObject() {
-  pcl::PassThrough<pcl::PointXYZ> pass_;
-  pass_.setFilterFieldName("y");
-  pass_.setFilterLimits(-0.5, 0.45);  // TUNE
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cropped_(new pcl::PointCloud<pcl::PointXYZ>);
+  // pcl::PassThrough<pcl::PointXYZ> pass_;
+  // pass_.setFilterFieldName("y");
+  // pass_.setFilterLimits(-0.5, 0.45);  // TUNE
+  // pcl::PointCloud<pcl::PointXYZ>::Ptr cropped_(new pcl::PointCloud<pcl::PointXYZ>);
 
-  pass_.setInputCloud(cloud_);
-  pass_.filter(*cropped_);
+  // pass_.setInputCloud(cloud_);
+  // pass_.filter(*cropped_);
 
   pcl::SACSegmentation<pcl::PointXYZ> _seg;
   _seg.setOptimizeCoefficients(true);
   _seg.setModelType(pcl::SACMODEL_PLANE);
   _seg.setMethodType(pcl::SAC_RANSAC);
-  _seg.setDistanceThreshold(0.025);
-  _seg.setInputCloud(cropped_);
+  _seg.setDistanceThreshold(0.02);
+  _seg.setInputCloud(cloud_);
+
+  // Eigen::Vector3f z(0, 0, 1);
+  // _seg.setAxis(z);
+  // _seg.setEpsAngle(M_PI / 64);
 
   pcl::PointIndices::Ptr _inliers(new pcl::PointIndices);
   pcl::ModelCoefficients::Ptr _coefficients(new pcl::ModelCoefficients);
@@ -67,8 +96,8 @@ void ObjectFinder::retreiveObject() {
   tree_->setInputCloud(object_cloud_);
 
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> _ec;
-  _ec.setClusterTolerance(0.025);
-  _ec.setMinClusterSize(50);
+  _ec.setClusterTolerance(0.05);
+  _ec.setMinClusterSize(20);
   _ec.setSearchMethod(tree_);
   _ec.setInputCloud(object_cloud_);
   _ec.extract(cluster_indices_);
@@ -154,49 +183,86 @@ double ObjectFinder::cornerScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud) 
   _seg.setMethodType(pcl::SAC_RANSAC);
   _seg.setDistanceThreshold(0.005);  // slightly relaxed for partial views
 
-  pcl::PointIndices::Ptr _inliers1(new pcl::PointIndices);
-  pcl::PointIndices::Ptr _inliers2(new pcl::PointIndices);
-  pcl::ModelCoefficients::Ptr _coeff1(new pcl::ModelCoefficients);
-  pcl::ModelCoefficients::Ptr _coeff2(new pcl::ModelCoefficients);
+  struct PlaneInfo {
+    Eigen::Vector3d normal;
+    std::size_t nb_inlier;
+  };
+  std::vector<PlaneInfo> planes;
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr _remaining(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr remaining(new pcl::PointCloud<pcl::PointXYZ>(*obj_cloud));
   pcl::ExtractIndices<pcl::PointXYZ> _extract;
 
-  // First plane
-  _seg.setInputCloud(obj_cloud);
-  _seg.segment(*_inliers1, *_coeff1);
+  // Require at least 5% of remaining cloud to accept a plane
+  const float min_inlier_ratio = 0.05f;
 
-  if (_inliers1->indices.empty())
-    return 0.0;
+  Eigen::Vector3d z_world(0, 0, 1.0);
+  double threshold = 0.2;
 
-  _extract.setInputCloud(obj_cloud);
-  _extract.setIndices(_inliers1);
-  _extract.setNegative(true);
-  _extract.filter(*_remaining);
+  for (int i = 0; i < 5; ++i) {
+    if (remaining->size() < 20)
+      break;
 
-  if (_remaining->points.size() < 12) {
-    RCLCPP_DEBUG(LOGGER, "Not enough points remaining for second plane");
-    return 0.0;
+    pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
+    pcl::ModelCoefficients::Ptr coeff(new pcl::ModelCoefficients);
+
+    _seg.setInputCloud(remaining);
+    _seg.segment(*inliers, *coeff);
+
+    if (inliers->indices.empty())
+      break;
+
+    if ((float)inliers->indices.size() / (float)remaining->size() < min_inlier_ratio)
+      break;
+
+    // Compute the centroid of inliers → a point on this face
+    pcl::PointCloud<pcl::PointXYZ>::Ptr face_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    _extract.setInputCloud(remaining);
+    _extract.setIndices(inliers);
+    _extract.setNegative(false);
+    _extract.filter(*face_cloud);
+
+    Eigen::Vector3d normal(coeff->values[0], coeff->values[1], coeff->values[2]);
+    normal.normalize();
+
+    double align = std::abs(normal.dot(z_world));
+    if (align > threshold && align < (1 - threshold))
+      continue;
+
+    planes.push_back({normal, inliers->indices.size()});
+
+    // Remove inliers and continue
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tmp(new pcl::PointCloud<pcl::PointXYZ>);
+    _extract.setNegative(true);
+    _extract.filter(*tmp);
+    remaining = tmp;
   }
 
-  // Second plane from remaining cloud
-  _seg.setInputCloud(_remaining);
-  _seg.segment(*_inliers2, *_coeff2);
+  if (planes.size() < 2) {
+    // RCLCPP_DEBUG(LOGGER, "Fewer than 2 planes found, not a possible corner");
+    return 0;
+  }
 
-  if (_inliers2->indices.empty())
-    return 0.0;
+  Eigen::Vector3d n0 = planes[0].normal;
+  Eigen::Vector3d n1 = planes[1].normal;
 
-  Eigen::Vector3f _n1(_coeff1->values[0], _coeff1->values[1], _coeff1->values[2]);
-  Eigen::Vector3f _n2(_coeff2->values[0], _coeff2->values[1], _coeff2->values[2]);
+  std::size_t nb_inlier0 = planes[0].nb_inlier;
+  std::size_t nb_inlier1 = planes[1].nb_inlier;
 
-  // BUG FIX: _inliers1 / _inliers2 were used as raw pointers — undefined.
-  // Correct: use ->indices.size() and cast to double.
-  double _ratio1 = static_cast<double>(_inliers1->indices.size()) / obj_cloud->size();
-  double _ratio2 = static_cast<double>(_inliers2->indices.size()) / obj_cloud->size();
+  double dot = std::abs(n0.dot(n1));
+  if (dot > 0.3)
+  {
+    RCLCPP_DEBUG(
+        rclcpp::get_logger("object_finder"),
+        "centroidBias: plane normals are not perpendicular (|dot|=%.2f), result may be unreliable.",
+        dot);
+  }
+
+  double _ratio0 = static_cast<double>(nb_inlier0) / obj_cloud->size();
+  double _ratio1 = static_cast<double>(nb_inlier1) / obj_cloud->size();
 
   // Score: planes should be perpendicular (dot ≈ 0) and cover most points
-  double _perp = 1.0 - std::fabs(_n1.normalized().dot(_n2.normalized()));
-  return _perp * (_ratio1 + _ratio2) * 0.5;
+  double _perp = 1.0 - std::fabs(n0.normalized().dot(n1.normalized()));
+  return _perp * (_ratio0 + _ratio1) * 0.5;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -273,6 +339,7 @@ void ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
   struct PlaneInfo {
     Eigen::Vector3d normal;
     Eigen::Vector3d mean_point;  // a point on the plane (inlier centroid)
+    double alignment;
   };
   std::vector<PlaneInfo> planes;
 
@@ -281,8 +348,8 @@ void ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
   // Require at least 5% of remaining cloud to accept a plane
   const float min_inlier_ratio = 0.05f;
 
-  Eigen::Vector3d z_world(0.0, 0.0, 1.0);
-  double align_threshold{0.1};
+  Eigen::Vector3d z_world(0, 0, 1.0);
+  double threshold = 0.1;
 
   for (int i = 0; i < 5; ++i) {
     if (remaining->size() < 20)
@@ -314,22 +381,25 @@ void ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
     Eigen::Vector3d normal(coeff->values[0], coeff->values[1], coeff->values[2]);
     normal.normalize();
 
-    double alignement = std::abs(normal.dot(z_world));
-    if (alignement > align_threshold && alignement < (1 - align_threshold))
+    // Remove inliers and continue
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tmp(new pcl::PointCloud<pcl::PointXYZ>);
+    extract.setNegative(true);
+    extract.filter(*tmp);
+    remaining = tmp;
+
+    double align = std::abs(normal.dot(z_world));
+    if (align > threshold && align < (1 - threshold))
+    {
+      RCLCPP_DEBUG(LOGGER, "align %f", align);
       continue;
+    }
 
     // Orient normal to point AWAY from the cloud centroid
     // (i.e. outward-facing, toward the sensor)
     if (normal.dot(face_centroid - centroid) < 0)
       normal = -normal;
 
-    planes.push_back({normal, face_centroid});
-
-    // Remove inliers and continue
-    pcl::PointCloud<pcl::PointXYZ>::Ptr tmp(new pcl::PointCloud<pcl::PointXYZ>);
-    extract.setNegative(true);
-    extract.filter(*tmp);
-    remaining = tmp;
+    planes.push_back({normal, face_centroid, align});
   }
 
   if (planes.size() < 2) {
@@ -339,6 +409,19 @@ void ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
     pose.translation() = centroid;
     return;
   }
+
+  std::sort(planes.begin(), planes.end(), [&threshold](PlaneInfo& p1, PlaneInfo& p2)
+  {
+    double v1 = std::min(std::fabs(p1.alignment - threshold), std::fabs(p1.alignment - 1 + threshold));
+    double v2 = std::min(std::fabs(p2.alignment - threshold), std::fabs(p2.alignment - 1 + threshold));
+
+    // double v1 = std::fabs(p1.alignment - threshold);
+    // double v2 = std::fabs(p2.alignment - threshold);
+
+    return v1 < v2;
+
+    // return p1.alignment < p2.alignment;
+  });
 
   // ---------------------------
   // 3. Build orthonormal frame from the two best normals
@@ -353,7 +436,7 @@ void ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
   double dot = std::abs(n0.dot(n1));
   if (dot > 0.3)  // ~17° from parallel — something went wrong
   {
-    RCLCPP_WARN(
+    RCLCPP_DEBUG(
         rclcpp::get_logger("object_finder"),
         "centroidBias: plane normals are not perpendicular (|dot|=%.2f), result may be unreliable.",
         dot);
@@ -652,8 +735,6 @@ void ObjectFinder::createBox(Eigen::Affine3d& pose) {
 
   moveit::planning_interface::PlanningSceneInterface psi;
   psi.applyCollisionObject(object);
-
-  obj_created = true;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -681,8 +762,6 @@ void ObjectFinder::createCylinder(Eigen::Affine3d& pose) {
 
   moveit::planning_interface::PlanningSceneInterface psi;
   psi.applyCollisionObject(object);
-
-  obj_created = true;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -702,7 +781,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   // NOTE: tree_ is now set inside retreiveObject() on object_cloud_
 
   if (cluster_indices_.empty()) {
-    RCLCPP_WARN(LOGGER, "No clusters found");
+    RCLCPP_DEBUG(LOGGER, "No clusters found");
     return;
   }
 
@@ -801,9 +880,8 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   for (const auto& idx : cluster_indices_[_index].indices)
     object_->points.push_back(object_cloud_->points[idx]);
 
-  if (!object_->points.empty() && !obj_created) {
-    Eigen::Affine3d _pose;
-    centroidBias(object_, _pose);
+  if (!object_->points.empty()) {
+    centroidBias(object_, pose_);
 
     visualization_msgs::msg::Marker _marker;
     _marker.header.frame_id = "world";
@@ -815,12 +893,9 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     _marker.action = visualization_msgs::msg::Marker::ADD;
 
     // Position = your centroid
-    _marker.pose.position.x = _pose.translation().x();
-    _marker.pose.position.y = _pose.translation().y();
-    _marker.pose.position.z = _pose.translation().z();
-
-    if (!obj_created)
-      createObstacle(_pose);
+    _marker.pose.position.x = pose_.translation().x();
+    _marker.pose.position.y = pose_.translation().y();
+    _marker.pose.position.z = pose_.translation().z();
 
     // No rotation needed
     _marker.pose.orientation.w = 1.0;
@@ -851,19 +926,18 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   _extract.setNegative(true);
   _extract.filter(*_no_cloud);
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr _result_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-  *_result_cloud = *_no_cloud;
-  *_result_cloud += *table_;  // BUG FIX: was a manual loop; use PCL concatenation
+  if (!_no_cloud->points.empty())
+  {
+    RCLCPP_DEBUG(LOGGER, "Result fill");
+    header_ = cloud_msg->header;
 
-  _result_cloud->width = _result_cloud->points.size();
-  _result_cloud->height = 1;
-  _result_cloud->is_dense = true;
-
-  // ── Publish the detected object cloud ────────────────────────────────
-  sensor_msgs::msg::PointCloud2 _output;
-  pcl::toROSMsg(*object_, _output);
-  _output.header = cloud_msg->header;
-  pub_filtered_->publish(_output);
+    *result_cloud_ = *_no_cloud;
+    *result_cloud_ += *table_;  // BUG FIX: was a manual loop; use PCL concatenation
+    
+    result_cloud_->width = result_cloud_->points.size();
+    result_cloud_->height = 1;
+    result_cloud_->is_dense = true;
+  }
 
   cluster_indices_.clear();
 }

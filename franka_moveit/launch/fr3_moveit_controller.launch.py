@@ -115,7 +115,7 @@ def generate_launch_description():
             pipelines=["ompl", "chomp", "pilz_industrial_motion_planner", "task"]
         )
         .sensors_3d(
-            file_path="config/sensors_3d.yaml",
+            file_path="config/sensors_3d_empty.yaml",
         )
         .to_moveit_configs()
     )
@@ -144,6 +144,15 @@ def generate_launch_description():
 
     kinematics_yaml = load_yaml(
         'franka_fr3_moveit_config', 'config/kinematics.yaml'
+    )
+
+    # Launch octomap node
+    octomap_cleaner_node = Node(
+        package="franka_moveit",
+        executable="octomap_generator",
+        output="screen",
+        parameters=[moveit_config.to_dict(), octomap_yaml],
+        arguments=["--ros-args", "--log-level", "info"],
     )
 
     # Start the actual move_group node/action server
@@ -315,6 +324,7 @@ def generate_launch_description():
          franka_robot_state_broadcaster,
          gripper_launch_file,
          static_tf_node,
+         octomap_cleaner_node,
          ]
         + load_controllers
     )

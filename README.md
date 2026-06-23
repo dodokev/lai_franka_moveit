@@ -26,11 +26,14 @@ ros2 launch franka_moveit rs.launch.py
 
 The robot self filter requires the robot urdf and the parameters (scale, padding) of the collision geometries.
 ```
-ros2 launch robot_self_filter self_filter.launch.py robot_description:="$(xacro /{path}/{robot_name}.urdf.xacro)" filter_config:=/{path}/{parameters}.yaml
+ros2 launch franka_moveit self_filter.launch.py robot_description:="$(xacro /{path}/{robot_name}.urdf.xacro)" filter_config:=/{path}/{parameters}.yaml
 ```
 
-(/home/labrob/franka_ros2_ws/src/franka_description/common/fr3/fr3_filter.urdf.xacro)
+(/home/labrob/franka_ros2_ws/src/franka_description/robots/fr3/fr3_filter.urdf.xacro)
 (/home/labrob/franka_ros2_ws/src/lai_franka_moveit/franka_moveit_config/config/robot_filter.yaml)
+
+ros2 launch franka_moveit self_filter.launch.py robot_description:="$(xacro /home/labrob/franka_ros2_ws/src/franka_description/robots/fr3/fr3_filter.urdf.xacro)" filter_config:=/home/labrob/franka_ros2_ws/src/lai_franka_moveit/franka_moveit_config/config/robot_filter.yaml
+
 
 The parameters can be modified in the franka_moveit_config/config/robot_filter.yaml. It is useful only if your robot urdf has simple shape as collision geometry (Sphere, Cylinder, Box). If you use meshes as collision geometry then the padding and scale doesn't work.
 

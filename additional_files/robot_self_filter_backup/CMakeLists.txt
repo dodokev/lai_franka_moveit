@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10.2)
 # cmake_policy(VERSION 3.28)
 
-project(robot_self_filter)
+project(robot_self_filter_backup)
 
 unset(FLANN_ROOT CACHE)
 unset(FLANN_ROOT)

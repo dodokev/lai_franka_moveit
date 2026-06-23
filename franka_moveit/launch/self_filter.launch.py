@@ -75,7 +75,7 @@ def generate_launch_description():
         parameters=[{
             "input_topic": "/points_filtered",
             "output_topic": "/points_filtered_world",
-            "target_frame": "/world"
+            "target_frame": "world"
         }],
         emulate_tty=True
     )

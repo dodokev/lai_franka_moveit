@@ -35,11 +35,15 @@ class ObjectFinder : public rclcpp::Node {
 
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_centroid_;
 
+  rclcpp::TimerBase::SharedPtr timer_;
+
   pcl::PointCloud<pcl::PointXYZ>::Ptr table_;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
   pcl::PointCloud<pcl::PointXYZ>::Ptr object_cloud_;
   pcl::PointCloud<pcl::PointXYZ>::Ptr object_;
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr result_cloud_;
 
   std::vector<pcl::PointIndices> cluster_indices_;
 
@@ -47,6 +51,8 @@ class ObjectFinder : public rclcpp::Node {
 
   std::vector<double> object_size_;
   SHAPE type_object_;
+
+  std_msgs::msg::Header header_;
 
   double penality_factor_{1.1};
 
@@ -81,6 +87,7 @@ class ObjectFinder : public rclcpp::Node {
   void createBox(Eigen::Affine3d& pose);
   void createCylinder(Eigen::Affine3d& pose);
 
-  bool obj_created{false};
-  std::string obj_name_;
+  void update();
+
+  Eigen::Affine3d pose_;
 };

@@ -4,7 +4,7 @@ self_filter:
     # =========================
     # Frames
     # =========================
-    sensor_frame: ""
+    # sensor_frame: "camera_link"
 
     # For spheres (single scale & padding)
     default_sphere_scale: 1.0
@@ -25,71 +25,56 @@ self_filter:
     zero_for_removed_points: false
     invert: false
     # =========================
-    # Robot links (Franka Panda)
+    # Robot links (Franka fr3)
     # =========================
     self_see_links:
       names:
-        - panda_link0
-        - panda_link1
-        - panda_link2
-        - panda_link3
-        - panda_link4
-        - panda_link5
-        # - panda_link6
-        - panda_link7
-        - panda_hand
-        # - panda_leftfinger
-        # - panda_rightfinger
-        # - panda_tool
+        - fr3_link0
+        - fr3_link1
+        - fr3_link2
+        - fr3_link3
+        - fr3_link4
+        - fr3_link5
+        # - fr3_link6
+        - fr3_link7
+        - fr3_hand
 
       # =========================
       # Custom tuning per link
       # =========================
 
-      panda_link0:
-        cylinder_scale: [1.4, 2.0]
+      fr3_link0:
+        cylinder_scale: [1.7, 2.0]
         cylinder_padding: [0.02, 0.02]
 
-      panda_link1:
-        cylinder_scale: [0.7, 2.0]
+      fr3_link1:
+        cylinder_scale: [0.8, 2.0]
         cylinder_padding: [0.02, 0.02]
 
-      panda_link2:
+      fr3_link2:
         cylinder_scale: [0.6, 2.2]
-        cylinder_padding: [0.02, 0.02]
+        cylinder_padding: [0.05, 0.06]
 
-      panda_link3:
+      fr3_link3:
         cylinder_scale: [0.7, 2.5]
         cylinder_padding: [0.02, 0.02]
 
-      panda_link4:
-        cylinder_scale: [0.6, 1.9]
+      fr3_link4:
+        cylinder_scale: [0.6, 2.0]
         cylinder_padding: [0.02, 0.02]
 
-      panda_link5:
-        cylinder_scale: [1.3, 4.0]
-        cylinder_padding: [0.02, 0.02]
+      fr3_link5:
+        cylinder_scale: [1.4, 4.0]
+        cylinder_padding: [0.02, 0.05]
 
-      # panda_link6:
+      # fr3_link6:
       #   cylinder_scale: [1.0, 1.0]
       #   cylinder_padding: [0.02, 0.02]
 
-      panda_link7:
-        cylinder_scale: [0.5, 1.3]
-        cylinder_padding: [0.02, 0.02]
+      fr3_link7:
+        cylinder_scale: [0.5, 1.4]
+        cylinder_padding: [0.06, 0.03]
 
-      panda_hand:
+      fr3_hand:
         box_scale: [0.6, 2.0, 1.5]
-        box_padding: [0.015, 0.015, 0.015]
-
-      # panda_leftfinger:
-      #   sphere_scale: 1.0
-      #   sphere_padding: 0.01
-
-      # panda_rightfinger:
-      #   sphere_scale: 1.0
-      #   sphere_padding: 0.01
-
-      # panda_tool:
-      #   sphere_scale: 1.0
-      #   sphere_padding: 0.01
+        box_padding: [0.03, 0.015, 0.015]

@@ -9,7 +9,7 @@ OctomapGenerator::OctomapGenerator()
     planning_scene_pub_ = this->create_publisher<moveit_msgs::msg::PlanningScene>("planning_scene", 10);
 
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-        "/points_used",
+        "/visualize_cloud",
         // "/camera/camera/depth/color/points",
         rclcpp::SensorDataQoS(),
         std::bind(&OctomapGenerator::cloudCallback, this, std::placeholders::_1));
@@ -24,7 +24,7 @@ void OctomapGenerator::cloudCallback(const sensor_msgs::msg::PointCloud2::Shared
     pcl::PointCloud<pcl::PointXYZ> cloud;
     pcl::fromROSMsg(*msg, cloud);
 
-    auto now = this->now();
+    last_time_ = this->now();
 
     for (auto &pt : cloud.points)
     {
@@ -32,7 +32,23 @@ void OctomapGenerator::cloudCallback(const sensor_msgs::msg::PointCloud2::Shared
 
         auto &v = map_[key];
         v.occupancy = 1.0f;
-        v.last_seen = now;
+        v.last_seen = last_time_;
+    }
+
+    removeOld();
+}
+
+
+void OctomapGenerator::removeOld()
+{
+    for (auto it = map_.begin(); it != map_.end();)
+    {
+        if (it->second.last_seen != last_time_)
+        {
+            it = map_.erase(it);
+            continue;
+        }
+        ++it;
     }
 }
 
@@ -93,7 +109,7 @@ std::shared_ptr<octomap::OcTree> OctomapGenerator::buildOctree()
 octomap_msgs::msg::Octomap OctomapGenerator::toMsg(std::shared_ptr<octomap::OcTree> tree)
 {
     octomap_msgs::msg::Octomap msg;
-    msg.header.frame_id = "world";
+    msg.header.frame_id = "base";
     msg.header.stamp = now();
 
     if (!octomap_msgs::fullMapToMsg(*tree, msg))
@@ -109,7 +125,7 @@ void OctomapGenerator::publishOctomap(std::shared_ptr<octomap::OcTree> tree)
     moveit_msgs::msg::PlanningScene ps;
     ps.is_diff = true;
 
-    ps.world.octomap.header.frame_id = "world";
+    ps.world.octomap.header.frame_id = "base";
     ps.world.octomap.header.stamp = now();
 
     ps.world.octomap.origin.position.x = 0.0;

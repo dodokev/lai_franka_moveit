@@ -89,9 +89,12 @@ configurable_parameters = [{'name': 'camera_name',                  'default': '
                            {'name': 'decimation_filter.enable',     'default': 'false', 'description': 'enable_decimation_filter'},
                            {'name': 'rotation_filter.enable',       'default': 'false', 'description': 'enable rotation_filter'},
                            {'name': 'rotation_filter.rotation',     'default': '0.0',   'description': 'rotation value: 0.0, 90.0, -90.0, 180.0'},
-                           {'name': 'spatial_filter.enable',        'default': 'false', 'description': 'enable_spatial_filter'},
-                           {'name': 'temporal_filter.enable',       'default': 'false', 'description': 'enable_temporal_filter'},
-                           {'name': 'disparity_filter.enasble',      'default': 'false', 'description': 'enable_disparity_filter'},
+                           {'name': 'spatial_filter.enable',        'default': 'true', 'description': 'enable_spatial_filter'},
+                           {'name': 'temporal_filter.enable',       'default': 'true', 'description': 'enable_temporal_filter'},
+                           {'name': 'temporal_filter.filter_smooth_alpha',       'default': '0.05', 'description': 'alpha_temporal_filter'},
+                           {'name': 'temporal_filter.filter_smooth_delta',       'default': '100', 'description': 'delta_temporal_filter'},
+                           {'name': 'temporal_filter.frames_queue_size',       'default': '32', 'description': 'persistency_temporal_filter'},
+                           {'name': 'disparity_filter.enable',      'default': 'false', 'description': 'enable_disparity_filter'},
                            {'name': 'hole_filling_filter.enable',   'default': 'false', 'description': 'enable_hole_filling_filter'},
                            {'name': 'hdr_merge.enable',             'default': 'false', 'description': 'hdr_merge filter enablement flag'},
                            {'name': 'wait_for_device_timeout',      'default': '-1.', 'description': 'Timeout for waiting for device to connect (Seconds)'},
@@ -106,6 +109,7 @@ configurable_parameters = [{'name': 'camera_name',                  'default': '
                            {'name': 'enable_occupancy',             'default': 'false', 'description': "'enable occupancy stream'"},
                            {'name': 'depth_mapping_camera.occupancy_profile', 'default': '0,0,0', 'description': "'Occupancy stream profile'"},
                           ]
+
 
 def declare_configurable_parameters(parameters):
     return [DeclareLaunchArgument(param['name'], default_value=param['default'], description=param['description']) for param in parameters]
@@ -184,23 +188,10 @@ def generate_launch_description():
         name="static_transform_publisher",
         output="log",
         # DONT FORGET TO CHANGE THIS PART
-        arguments=["0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "tag36h11:15", "world"],
-    )
-
-    cloud_tag = Node(
-        package="franka_moveit",
-        executable="cloud_transform",
-        output="screen",
-        parameters=[{
-            "input_topic": "/camera/camera/depth/color/points",
-            "output_topic": "/points_filtered_world",
-            "target_frame": "world"
-        }],
-        emulate_tty=True
+        arguments=["-0.155", "0.0", "0.0", "0.0", "0.0", "0.0", "tag36h11:15", "world"],
     )
 
     return LaunchDescription(declare_configurable_parameters(configurable_parameters) + [
-        cloud_tag,
         april,
         april_frame,
         OpaqueFunction(function=launch_setup, kwargs = {'params' : set_configurable_parameters(configurable_parameters)}),
