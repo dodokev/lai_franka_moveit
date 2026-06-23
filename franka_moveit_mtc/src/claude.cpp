@@ -46,10 +46,11 @@ private:
   mtc::Task createPickTask();
   mtc::Task createPlaceTask();
 
+  
   // Predicate used by PredicateFilter stages to reject solutions that
   // get too close to obstacles or violate joint bounds.
   std::function<bool(const mtc::SolutionBase&, std::string&)> makeClearancePredicate();
-
+  
   // Builds a fresh Task via `factory`, plans it, and executes the first
   // solution. On execution FAILURE (not planning failure) it rebuilds the
   // task from `factory` again -- since each task starts from the real,
@@ -57,13 +58,14 @@ private:
   // from wherever the robot/scene actually ended up, instead of restarting
   // the whole multi-task pipeline.
   bool planAndExecute(const std::string& label, const std::function<mtc::Task()>& factory,
-                       int max_plan_attempts = 3, int max_execute_retries = 2);
-
+  int max_plan_attempts = 3, int max_execute_retries = 2);
+  
   std::shared_ptr<mtc::solvers::JointInterpolationPlanner> interpolation_planner_;
   std::shared_ptr<mtc::solvers::CartesianPath> cartesian_planner_;
   std::shared_ptr<mtc::solvers::MultiPlanner> multipipeline_planner_;
-
+  
   rclcpp::Node::SharedPtr node_;
+  moveit::core::RobotModelConstPtr model_{nullptr};
 
   double x_{0.0};
   double y_{0.0};
@@ -253,8 +255,17 @@ bool MTCTaskNode::planAndExecute(const std::string& label, const std::function<m
     // Build a brand-new Task each attempt. Its CurrentState stage will pick up
     // whatever the *real* robot/planning-scene state is right now, so this
     // naturally resumes from wherever the previous (failed) execution left off.
-    mtc::Task task = factory();
-
+    mtc::Task task;
+    
+    if (model_ == nullptr)
+    {
+      RCLCPP_WARN(LOGGER, "Load the robot model one time");
+      task.loadRobotModel(node_);
+      model_ = task.getRobotModel();
+    }
+    
+    task = factory();
+    
     try
     {
       task.init();
@@ -291,7 +302,7 @@ bool MTCTaskNode::planAndExecute(const std::string& label, const std::function<m
 mtc::Task MTCTaskNode::createPickTask()
 {
   mtc::Task task;
-  task.loadRobotModel(node_);
+  task.setRobotModel(model_);
 
   task.setProperty("group", arm_group_name_);
   task.setProperty("eef", hand_group_name_);
@@ -494,7 +505,7 @@ mtc::Task MTCTaskNode::createPickTask()
 mtc::Task MTCTaskNode::createPlaceTask()
 {
   mtc::Task task;
-  task.loadRobotModel(node_);
+  task.setRobotModel(model_);
 
   task.setProperty("group", arm_group_name_);
   task.setProperty("eef", hand_group_name_);
