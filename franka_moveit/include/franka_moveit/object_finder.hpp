@@ -90,4 +90,6 @@ class ObjectFinder : public rclcpp::Node {
   void update();
 
   Eigen::Affine3d pose_;
+  bool created_{false};
+  bool cloud_received_{false};
 };

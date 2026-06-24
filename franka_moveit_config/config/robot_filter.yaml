@@ -44,37 +44,37 @@ self_filter:
       # =========================
 
       fr3_link0:
-        cylinder_scale: [1.7, 2.0]
-        cylinder_padding: [0.02, 0.02]
+        cylinder_scale: [1.75, 2.15]
+        cylinder_padding: [0.01, 0.01]
 
       fr3_link1:
-        cylinder_scale: [0.8, 2.0]
-        cylinder_padding: [0.02, 0.02]
+        cylinder_scale: [1.0, 2.2]
+        cylinder_padding: [0.01, 0.01]
 
       fr3_link2:
-        cylinder_scale: [0.6, 2.2]
-        cylinder_padding: [0.05, 0.06]
+        cylinder_scale: [0.6, 2.5]
+        cylinder_padding: [0.01, 0.01]
 
       fr3_link3:
-        cylinder_scale: [0.7, 2.5]
+        cylinder_scale: [1.0, 2.8]
         cylinder_padding: [0.02, 0.02]
 
       fr3_link4:
-        cylinder_scale: [0.6, 2.0]
-        cylinder_padding: [0.02, 0.02]
+        cylinder_scale: [0.6, 2.2]
+        cylinder_padding: [0.035, 0.03]
 
       fr3_link5:
-        cylinder_scale: [1.4, 4.0]
-        cylinder_padding: [0.02, 0.05]
+        cylinder_scale: [1.4, 4.4]
+        cylinder_padding: [0.01, 0.01]
 
       # fr3_link6:
       #   cylinder_scale: [1.0, 1.0]
       #   cylinder_padding: [0.02, 0.02]
 
       fr3_link7:
-        cylinder_scale: [0.5, 1.4]
-        cylinder_padding: [0.06, 0.03]
+        cylinder_scale: [0.5, 1.6]
+        cylinder_padding: [0.01, 0.01]
 
       fr3_hand:
-        box_scale: [0.6, 2.0, 1.5]
-        box_padding: [0.03, 0.015, 0.015]
+        box_scale: [0.6, 2.0, 1.8]
+        box_padding: [0.01, 0.01, 0.01]

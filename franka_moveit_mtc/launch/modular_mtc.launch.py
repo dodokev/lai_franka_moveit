@@ -156,7 +156,7 @@ def generate_launch_description():
             cartesian_lim_yaml,
             moveit_config.planning_pipelines,
         ],
-        # prefix="gdb -ex run --args",
+        prefix="gdb -ex run --args",
         emulate_tty=True,
     )
 

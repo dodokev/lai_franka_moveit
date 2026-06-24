@@ -71,7 +71,7 @@ private:
   double y_{0.0};
   double z_{0.0};
 
-  double margin_{0.002};
+  double margin_{0.0035};
   double hand_max{0.034};
 
   geometry_msgs::msg::Point position_;

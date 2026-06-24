@@ -64,7 +64,7 @@ class MTCTaskNode {
   double y_{0.0};
   double z_{0.0};
 
-  double margin_{0.002};
+  double margin_{0.0035};
   double hand_max{0.034};
 
   geometry_msgs::msg::Point position_;
@@ -496,9 +496,9 @@ void MTCTaskNode::createPlaceTask() {
 
       geometry_msgs::msg::PoseStamped target_pose_msg;
       target_pose_msg.header.frame_id = "world";
-      target_pose_msg.pose.position.x = position_.x;
+      target_pose_msg.pose.position.x = 0.5;
       target_pose_msg.pose.position.y = 0.25;
-      target_pose_msg.pose.position.z = position_.z;
+      target_pose_msg.pose.position.z = z_/2 + margin_;
       target_pose_msg.pose.orientation.w = 1.0;
       stage->setPose(target_pose_msg);
       stage->setMonitoredStage(pick_stage_ptr_);

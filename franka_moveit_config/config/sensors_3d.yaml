@@ -7,5 +7,5 @@ default_sensor:
   max_update_rate: 1.0
   padding_offset: 0.0
   padding_scale: 1.0
-  point_cloud_topic: /points_used
+  point_cloud_topic: /placeholder
   point_subsample: 1

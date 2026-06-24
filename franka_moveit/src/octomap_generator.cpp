@@ -3,6 +3,11 @@
 static auto const LOGGER = rclcpp::get_logger("octomap_generator");
 using namespace std::chrono_literals;
 
+/**
+ * USE PLANNING SCENE COLLISION SHAPE TO REMOVE THE ATTACHED OBJECT FROM POINT CLOUD
+ * SHOULD STILL USE OBJECT FINDER ? MAYBE BUT NEED REFINING TO RELIABLE
+ */
+
 OctomapGenerator::OctomapGenerator()
     : Node("octomap_generator")
 {
@@ -17,6 +22,8 @@ OctomapGenerator::OctomapGenerator()
     timer_ = create_wall_timer(
         std::chrono::milliseconds(10),
         std::bind(&OctomapGenerator::updateOctomap, this));
+
+    map_.clear();
 }
 
 void OctomapGenerator::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
@@ -94,13 +101,18 @@ std::shared_ptr<octomap::OcTree> OctomapGenerator::buildOctree()
         tree->updateNode(octomap::point3d(x, y, z), true);
     }
 
-    // To avoid Moveit from ignored the empty Octomap
-    if (map_.empty())
-    {
-        // RCLCPP_INFO(LOGGER, "Empty not empty ...");
-        tree->updateNode(octomap::point3d(0, 0, -1), true);
-    }
+    // if (map_.empty())
+    // {
+    //     // RCLCPP_INFO(LOGGER, "Empty not empty ...");
+    //     tree->updateNode(octomap::point3d(0, 0, -1), true);
+    // }
 
+    /**
+     * HOW THE FUCK, IT 17 NODES !
+     */
+
+    // RCLCPP_WARN(LOGGER, "Points in map : %ld", map_.size());
+    // RCLCPP_WARN(LOGGER, "Points in Octree : %ld", tree->calcNumNodes());
     tree->updateInnerOccupancy();
 
     return tree;

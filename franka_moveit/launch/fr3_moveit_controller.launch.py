@@ -153,6 +153,7 @@ def generate_launch_description():
         output="screen",
         parameters=[moveit_config.to_dict(), octomap_yaml],
         arguments=["--ros-args", "--log-level", "info"],
+        emulate_tty=True,
     )
 
     # Start the actual move_group node/action server

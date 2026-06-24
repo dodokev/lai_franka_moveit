@@ -5,6 +5,10 @@
 
 static auto const LOGGER = rclcpp::get_logger("object_finder");
 
+/**
+ * MAYBE ADD A STATISTICAL REMOVER FOR ONLY OBJECTS PART, TUNE TO AVOIDING LAG
+ * IF REALLY NOT GOOD --> GIVE ALSO ORIENTATION Z AND TABLE CONSTRAINT
+ */
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
     : Node("object_finder"), planning_scene_(ps) {
   sub_unfilter_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -39,13 +43,17 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
   // BUG FIX: cast to enum so switch/comparison is type-safe
   
   timer_ = create_wall_timer(
-        std::chrono::milliseconds(10),
+        std::chrono::milliseconds(100),
         std::bind(&ObjectFinder::update, this));
 }
 
 void ObjectFinder::update()
 {
-  createObstacle(pose_);
+  // if (!created_ && cloud_received_)
+  // {
+  //   createObstacle(pose_);
+  //   created_ = true;
+  // }
 
   // RCLCPP_DEBUG(LOGGER, "Cloud send");
   // ── Publish the detected object cloud ────────────────────────────────
@@ -290,6 +298,10 @@ double ObjectFinder::planeScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud) {
 // ────────────────────────────────────────────────────────────────────────────
 double ObjectFinder::cylinderScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
                                    pcl::PointCloud<pcl::Normal>::Ptr normals) {
+
+  if (obj_cloud->points.size() < 20)
+    return 0;
+
   pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> _seg;
   _seg.setOptimizeCoefficients(true);
   _seg.setModelType(pcl::SACMODEL_CYLINDER);
@@ -775,6 +787,7 @@ void ObjectFinder::createObstacle(Eigen::Affine3d& pose) {
 // ────────────────────────────────────────────────────────────────────────────
 void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg) {
   RCLCPP_DEBUG(LOGGER, "Received point cloud");
+  cloud_received_ = true;
   pcl::fromROSMsg(*cloud_msg, *cloud_);
 
   retreiveObject();
@@ -872,75 +885,75 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   auto _it = std::max_element(_tab_score.begin(), _tab_score.end());
   int _index = static_cast<int>(std::distance(_tab_score.begin(), _it));
 
-  RCLCPP_DEBUG(LOGGER, "Best cluster index: %d  (score: %.3f)", _index, *_it);
+  
+    // RCLCPP_WARN(LOGGER, "Best cluster index: %d  (score: %.3f)", _index, *_it);
+    // =====================================================================
+    // ── Rebuild object_ from best cluster ────────────────────────────────
+    object_->clear();
+    for (const auto& idx : cluster_indices_[_index].indices)
+      object_->points.push_back(object_cloud_->points[idx]);
 
-  // =====================================================================
-  // ── Rebuild object_ from best cluster ────────────────────────────────
-  object_->clear();
-  for (const auto& idx : cluster_indices_[_index].indices)
-    object_->points.push_back(object_cloud_->points[idx]);
+    if (!object_->points.empty()) {
+      centroidBias(object_, pose_);
 
-  if (!object_->points.empty()) {
-    centroidBias(object_, pose_);
+      visualization_msgs::msg::Marker _marker;
+      _marker.header.frame_id = "world";
+      _marker.header.stamp = rclcpp::Clock().now();
 
-    visualization_msgs::msg::Marker _marker;
-    _marker.header.frame_id = "world";
-    _marker.header.stamp = rclcpp::Clock().now();
+      _marker.ns = "centroid";
+      _marker.id = 0;
+      _marker.type = visualization_msgs::msg::Marker::SPHERE;
+      _marker.action = visualization_msgs::msg::Marker::ADD;
 
-    _marker.ns = "centroid";
-    _marker.id = 0;
-    _marker.type = visualization_msgs::msg::Marker::SPHERE;
-    _marker.action = visualization_msgs::msg::Marker::ADD;
+      // Position = your centroid
+      _marker.pose.position.x = pose_.translation().x();
+      _marker.pose.position.y = pose_.translation().y();
+      _marker.pose.position.z = pose_.translation().z();
 
-    // Position = your centroid
-    _marker.pose.position.x = pose_.translation().x();
-    _marker.pose.position.y = pose_.translation().y();
-    _marker.pose.position.z = pose_.translation().z();
+      // No rotation needed
+      _marker.pose.orientation.w = 1.0;
 
-    // No rotation needed
-    _marker.pose.orientation.w = 1.0;
+      // Size of the sphere
+      _marker.scale.x = 0.02;
+      _marker.scale.y = 0.02;
+      _marker.scale.z = 0.02;
 
-    // Size of the sphere
-    _marker.scale.x = 0.02;
-    _marker.scale.y = 0.02;
-    _marker.scale.z = 0.02;
+      // Color (red here)
+      _marker.color.r = 1.0;
+      _marker.color.g = 0.0;
+      _marker.color.b = 0.0;
+      _marker.color.a = 1.0;
 
-    // Color (red here)
-    _marker.color.r = 1.0;
-    _marker.color.g = 0.0;
-    _marker.color.b = 0.0;
-    _marker.color.a = 1.0;
+      pub_centroid_->publish(_marker);
+    }
 
-    pub_centroid_->publish(_marker);
-  }
+    // =====================================================================
+    // ── Remove target from remaining cloud and re-add table ──────────────
+    pcl::PointIndices::Ptr _best_indices(new pcl::PointIndices);
+    _best_indices->indices = cluster_indices_[_index].indices;
 
-  // =====================================================================
-  // ── Remove target from remaining cloud and re-add table ──────────────
-  pcl::PointIndices::Ptr _best_indices(new pcl::PointIndices);
-  _best_indices->indices = cluster_indices_[_index].indices;
+    pcl::PointCloud<pcl::PointXYZ>::Ptr _no_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::ExtractIndices<pcl::PointXYZ> _extract;
+    _extract.setInputCloud(object_cloud_);
+    _extract.setIndices(_best_indices);
+    _extract.setNegative(true);
+    _extract.filter(*_no_cloud);
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr _no_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-  pcl::ExtractIndices<pcl::PointXYZ> _extract;
-  _extract.setInputCloud(object_cloud_);
-  _extract.setIndices(_best_indices);
-  _extract.setNegative(true);
-  _extract.filter(*_no_cloud);
+    if (!_no_cloud->points.empty())
+    {
+      RCLCPP_DEBUG(LOGGER, "Result fill");
+      header_ = cloud_msg->header;
 
-  if (!_no_cloud->points.empty())
-  {
-    RCLCPP_DEBUG(LOGGER, "Result fill");
-    header_ = cloud_msg->header;
-
-    *result_cloud_ = *_no_cloud;
-    *result_cloud_ += *table_;  // BUG FIX: was a manual loop; use PCL concatenation
-    
-    result_cloud_->width = result_cloud_->points.size();
-    result_cloud_->height = 1;
-    result_cloud_->is_dense = true;
-  }
+      *result_cloud_ = *_no_cloud;
+      *result_cloud_ += *table_;  // BUG FIX: was a manual loop; use PCL concatenation
+      
+      result_cloud_->width = result_cloud_->points.size();
+      result_cloud_->height = 1;
+      result_cloud_->is_dense = true;
+    }
 
   cluster_indices_.clear();
-}
+  }
 
 // ────────────────────────────────────────────────────────────────────────────
 int main(int argc, char* argv[]) {

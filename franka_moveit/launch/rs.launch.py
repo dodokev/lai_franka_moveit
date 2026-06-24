@@ -191,8 +191,17 @@ def generate_launch_description():
         arguments=["-0.155", "0.0", "0.0", "0.0", "0.0", "0.0", "tag36h11:15", "world"],
     )
 
+    outlier_node = Node(
+        package="franka_moveit",
+        executable="outlier_filter",
+        name="outlier_filter",
+        output="log",
+        emulate_tty=True
+    )
+
     return LaunchDescription(declare_configurable_parameters(configurable_parameters) + [
         april,
         april_frame,
         OpaqueFunction(function=launch_setup, kwargs = {'params' : set_configurable_parameters(configurable_parameters)}),
+        outlier_node,
     ])

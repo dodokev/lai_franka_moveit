@@ -20,9 +20,9 @@ OutlierFilter::OutlierFilter()
     tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
 
     pass_Xaxis.setFilterFieldName("x");
-    pass_Xaxis.setFilterLimits(-0.5, 1.0); // TUNE
+    pass_Xaxis.setFilterLimits(-0.25, 1.0); // TUNE
     pass_Yaxis.setFilterFieldName("y");
-    pass_Yaxis.setFilterLimits(-1.0, 1.0); // TUNE
+    pass_Yaxis.setFilterLimits(-1.0, 0.5); // TUNE
     pass_Zaxis.setFilterFieldName("z");
     pass_Zaxis.setFilterLimits(0, 1.0); // TUNE
 
@@ -34,7 +34,6 @@ OutlierFilter::OutlierFilter()
 
     min_keep_size_ = 50; // TUNE
     ec_.setMinClusterSize(min_keep_size_);
-
 }
 
 void OutlierFilter::planeFitting(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
@@ -89,13 +88,16 @@ void OutlierFilter::planeFitting(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
     vg_.filter(*table_);
 
     for (auto& pt : table_->points)
-        pt.z -= 0.025;
+        pt.z -= 0.0225;
 }
 
 void OutlierFilter::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg)
 {
     // RCLCPP_INFO(LOGGER, "Cloud get ...");
     pcl::fromROSMsg(*cloud_msg, *cloud_);
+
+    if (cloud_->points.empty())
+        return;
 
     pass_Xaxis.setInputCloud(cloud_);
     pass_Xaxis.filter(*cropped_Xaxis);
