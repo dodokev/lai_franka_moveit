@@ -639,8 +639,16 @@ int main(int argc, char** argv) {
     executor.remove_node(mtc_task_node->getNodeBaseInterface());
   });
 
+  
   mtc_task_node->setupPlanner();
   mtc_task_node->setupPlanningScene();
+
+  moveit::planning_interface::PlanningSceneInterface psi;
+  auto objects = psi.getObjects();
+
+  for (auto& obj : objects)
+    RCLCPP_WARN(LOGGER, "obj name : %s", obj.first.c_str());
+  
   mtc_task_node->doTask();
 
   spin_thread->join();
