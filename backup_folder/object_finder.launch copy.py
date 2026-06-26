@@ -17,12 +17,29 @@ def load_yaml(package_name, file_path):
         return yaml.safe_load(file)
 
 def generate_launch_description():
+    # SPHERE: r, CYLINDER: rh, BOX: lwh
+    DeclareLaunchArgument(
+        'size',
+        default_value=''
+    ),
+
     object_finder = Node(
         package="franka_moveit",
         executable="object_finder",
         output="screen",
-        prefix="gdb -ex run --args",
+        parameters=[{
+            "size": LaunchConfiguration('size'),
+        }],
         emulate_tty=True,
     )
+
+    # outlier_filter = Node(
+    #     package="franka_moveit",
+    #     executable="outlier_filter",
+    #     output="screen",
+    #     parameters=[{
+    #     }],
+    #     emulate_tty=True,
+    # )
 
     return LaunchDescription([object_finder])

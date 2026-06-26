@@ -5,6 +5,10 @@
 
 static auto const LOGGER = rclcpp::get_logger("object_finder");
 
+/**
+ * MAYBE ADD A STATISTICAL REMOVER FOR ONLY OBJECTS PART, TUNE TO AVOIDING LAG
+ * IF REALLY NOT GOOD --> GIVE ALSO ORIENTATION Z AND TABLE CONSTRAINT
+ */
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
     : Node("object_finder"), planning_scene_(ps) {
   sub_unfilter_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -13,54 +17,63 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
   pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/visualize_cloud",
                                                                         rclcpp::SensorDataQoS());
 
-  sub_size_ = this->create_subscription<std_msgs::msg::String>(
-      "/add_lost_obj", rclcpp::SensorDataQoS(),
-      std::bind(&ObjectFinder::request_callback, this, std::placeholders::_1));
+  pub_centroid_ = this->create_publisher<visualization_msgs::msg::Marker>("/centroid", 10);
 
   result_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 
   table_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-  cluster_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   object_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  object_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
-}
 
-void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
-{
-  std::string _param = msg->data;
-  
+  this->declare_parameter<std::string>("size", "");
+  std::string _param = this->get_parameter("size").as_string();
   std::vector<std::string> _param_split;
   boost::split(_param_split, _param, boost::is_any_of(","));
-
-  std::vector<double> _dim;
-  Shape _type;
-
   for (const auto& _p : _param_split)
-    _dim.push_back(std::stof(_p));
-  _type = static_cast<Shape>(_dim.size());
+    object_size_.push_back(std::stof(_p));
   
-  bool exist{false};
-  for (auto& obj : objects_)
-  {
-    if (obj.shape == _type)
-      if (obj.dimension == _dim)
-      {
-        ++(obj.number);
-        exist = true;
-        break;
-      }
-  }
-    
-  if (!exist)
-    objects_.push_back(Object(_type, _dim));
+  /**
+   * CHANGE THIS TO A SERVICE CLASS - GET STRING - CUTIT - PUSHBACK DIM = NEW OBJECT TO FIND
+   * result_cloud change, more vectors
+   */
+
+  type_object_ = static_cast<SHAPE>(object_size_.size());
+  // BUG FIX: cast to enum so switch/comparison is type-safe
   
-  begin_ = true;
-  RCLCPP_WARN(LOGGER, "New object to find");
+  timer_ = create_wall_timer(
+        std::chrono::milliseconds(100),
+        std::bind(&ObjectFinder::update, this));
+}
+
+void ObjectFinder::update()
+{
+  // if (!created_ && cloud_received_)
+  // {
+  //   createObstacle(pose_);
+  //   created_ = true;
+  // }
+
+  // RCLCPP_DEBUG(LOGGER, "Cloud send");
+  // ── Publish the detected object cloud ────────────────────────────────
+  sensor_msgs::msg::PointCloud2 _output;
+  pcl::toROSMsg(*result_cloud_, _output);
+  // pcl::toROSMsg(*object_, _output);
+  // pcl::toROSMsg(*table_, _output);
+  _output.header = header_;
+  pub_filtered_->publish(_output);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 void ObjectFinder::retreiveObject() {
+  // pcl::PassThrough<pcl::PointXYZ> pass_;
+  // pass_.setFilterFieldName("y");
+  // pass_.setFilterLimits(-0.5, 0.45);  // TUNE
+  // pcl::PointCloud<pcl::PointXYZ>::Ptr cropped_(new pcl::PointCloud<pcl::PointXYZ>);
+
+  // pass_.setInputCloud(cloud_);
+  // pass_.filter(*cropped_);
 
   pcl::SACSegmentation<pcl::PointXYZ> _seg;
   _seg.setOptimizeCoefficients(true);
@@ -84,26 +97,17 @@ void ObjectFinder::retreiveObject() {
   _extract.setNegative(false);
   _extract.filter(*table_);
 
-  /**
-   * Save table information
-   */
-  table_normal_ = Eigen::Vector3d(_coefficients->values[0], _coefficients->values[1], _coefficients->values[2]).normalized();
-  if (table_normal_.z() < 0) table_normal_ = -table_normal_; // point "up"
-    table_d_ = _coefficients->values[3];
-
-  RCLCPP_INFO_STREAM(LOGGER, "TAble normal : " << table_normal_);
-
   _extract.setNegative(true);
-  _extract.filter(*cluster_cloud_);
+  _extract.filter(*object_cloud_);
 
   // BUG FIX: tree must be set before EuclideanClusterExtraction uses it
-  tree_->setInputCloud(cluster_cloud_);
+  tree_->setInputCloud(object_cloud_);
 
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> _ec;
   _ec.setClusterTolerance(0.05);
   _ec.setMinClusterSize(20);
   _ec.setSearchMethod(tree_);
-  _ec.setInputCloud(cluster_cloud_);
+  _ec.setInputCloud(object_cloud_);
   _ec.extract(cluster_indices_);
 }
 
@@ -123,25 +127,25 @@ void ObjectFinder::getCentroidAndOBB(pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_clo
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-double ObjectFinder::boundingScore(const std::vector<double>& dim, const std::vector<double>& ground_dim, const Shape& type) {
+double ObjectFinder::boundingScore(std::vector<double> dim) {
   // dims already sorted descending by caller
-  std::vector<double> _copy = ground_dim;
+  std::vector<double> _copy = object_size_;
   std::sort(_copy.begin(), _copy.end(), std::greater<double>());
 
   double _score = 0.0;
-  switch (type) {
-    case Shape::SPHERE:
+  switch (type_object_) {
+    case SHAPE::SPHERE:
       _score = std::sqrt(std::pow(dim[0] - _copy[0], 2));
       break;
-    case Shape::CYLINDER:
+    case SHAPE::CYLINDER:
       _score = std::sqrt(std::pow(dim[0] - _copy[0], 2) + std::pow(2 * dim[1] - _copy[1], 2));
       break;
-    case Shape::BOX:
+    case SHAPE::BOX:
       _score = std::sqrt(std::pow(dim[0] - _copy[0], 2) + std::pow(dim[1] - _copy[1], 2) +
                          std::pow(dim[2] - _copy[2], 2));
       break;
     default:
-      RCLCPP_ERROR(LOGGER, "INCORRECT Shape TYPE");
+      RCLCPP_ERROR(LOGGER, "INCORRECT SHAPE TYPE");
   }
 
   // Returns [0,1]: 1 = perfect match, approaches 0 as dimensions diverge
@@ -199,6 +203,7 @@ double ObjectFinder::cornerScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud) 
   // Require at least 5% of remaining cloud to accept a plane
   const float min_inlier_ratio = 0.05f;
 
+  Eigen::Vector3d z_world(0, 0, 1.0);
   double threshold = 0.2;
 
   for (int i = 0; i < 5; ++i) {
@@ -227,7 +232,7 @@ double ObjectFinder::cornerScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud) 
     Eigen::Vector3d normal(coeff->values[0], coeff->values[1], coeff->values[2]);
     normal.normalize();
 
-    double align = std::abs(normal.dot(table_normal_));
+    double align = std::abs(normal.dot(z_world));
     if (align > threshold && align < (1 - threshold))
       continue;
 
@@ -292,7 +297,7 @@ double ObjectFinder::planeScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud) {
 
 // ────────────────────────────────────────────────────────────────────────────
 double ObjectFinder::cylinderScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
-                                   pcl::PointCloud<pcl::Normal>::Ptr normals, const std::vector<double>& dim, const Shape& type) {
+                                   pcl::PointCloud<pcl::Normal>::Ptr normals) {
 
   if (obj_cloud->points.size() < 20)
     return 0;
@@ -308,7 +313,8 @@ double ObjectFinder::cylinderScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
   _seg.setEpsAngle(M_PI / 2.0);
 
   // BUG FIX: pick the right size index per object type.
-  double _r = (type == Shape::SPHERE) ? dim[0] : dim[1];
+  // For CYLINDER: object_size_ = {radius, height} → radius is index 0
+  double _r = (type_object_ == SHAPE::CYLINDER) ? object_size_[1] : object_size_[1];
   _seg.setRadiusLimits(_r * 0.85, _r * 1.15);  // wider tolerance for partial view
 
   _seg.setInputCloud(obj_cloud);
@@ -321,11 +327,9 @@ double ObjectFinder::cylinderScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
-                                   const std::vector<double>& dim) {
+void ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
+                                   Eigen::Affine3d& pose) {
   // ---------------------------
-  Eigen::Affine3d pose;
-
   // 1. Compute centroid
   // ---------------------------
   Eigen::Vector4f centroid4;
@@ -356,6 +360,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
   // Require at least 5% of remaining cloud to accept a plane
   const float min_inlier_ratio = 0.05f;
 
+  Eigen::Vector3d z_world(0, 0, 1.0);
   double threshold = 0.1;
 
   for (int i = 0; i < 5; ++i) {
@@ -394,7 +399,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
     extract.filter(*tmp);
     remaining = tmp;
 
-    double align = std::abs(normal.dot(table_normal_));
+    double align = std::abs(normal.dot(z_world));
     if (align > threshold && align < (1 - threshold))
     {
       RCLCPP_DEBUG(LOGGER, "align %f", align);
@@ -414,7 +419,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
     RCLCPP_WARN(LOGGER, "centroidBias: fewer than 2 planes found, falling back to PCA centroid.");
     pose.linear() = Eigen::Matrix3d::Identity();
     pose.translation() = centroid;
-    return pose;
+    return;
   }
 
   std::sort(planes.begin(), planes.end(), [&threshold](PlaneInfo& p1, PlaneInfo& p2)
@@ -459,14 +464,15 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
   // ---------------------------
   // 4. Map axes → box dimensions
   //
-  //  We want the longest dimension along Z, but we don't force it
+  //  We want the longest dimension along Z, but we don't force it —
+  //  instead we assign object_size_ dimensions to the nearest axis.
   // ---------------------------
   // Candidate axes and known half-lengths
   std::array<Eigen::Vector3d, 3> axes = {n0, n1, n2};
   std::array<double, 3> sizes = {
-      dim[0],  // longest
-      dim[1],
-      dim[2]  // shortest
+      object_size_[0],  // longest
+      object_size_[1],
+      object_size_[2]  // shortest
   };
 
   // Sort sizes descending
@@ -558,17 +564,12 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
 
   pose.linear() = R;
   pose.translation() = box_center;
-
-  return pose;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
-                                        const std::vector<double>& dim) {
-  double known_radius = dim[1];
-  double known_height = dim[0];
-
-  Eigen::Affine3d pose;
+void ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
+                                        Eigen::Affine3d& pose) {
+  double known_radius = object_size_[1];
+  double known_height = object_size_[0];
 
   // ---------------------------
   // 1. Raw centroid (for fallback + axial bias heuristic only)
@@ -710,32 +711,26 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   pose.linear() = R;
   pose.translation() = true_center;
-
-  return pose;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-Eigen::Affine3d ObjectFinder::centroidBias(
-  pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
-  const std::vector<double>& dim, const Shape& type) {
-
-  if (type == Shape::BOX)
-    return centroidBiasBox(obj_cloud, dim);
-  else if (type == Shape::CYLINDER)
-    return centroidBiasCylinder(obj_cloud, dim);
-
-  return Eigen::Affine3d();
+void ObjectFinder::centroidBias(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
+                                Eigen::Affine3d& pose) {
+  if (type_object_ == SHAPE::BOX)
+    centroidBiasBox(obj_cloud, pose);
+  if (type_object_ == SHAPE::CYLINDER)
+    centroidBiasCylinder(obj_cloud, pose);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-void ObjectFinder::createBox(Eigen::Affine3d& pose, const std::vector<double>& dim, std::size_t& numero) {
+void ObjectFinder::createBox(Eigen::Affine3d& pose) {
   moveit_msgs::msg::CollisionObject object;
-  object.id = "object" + std::to_string(numero);
+  object.id = "object";
   object.header.frame_id = "world";
   object.primitives.resize(1);
 
   object.primitives[0].type = shape_msgs::msg::SolidPrimitive::BOX;
-  object.primitives[0].dimensions = {dim[0], dim[1], dim[2]};
+  object.primitives[0].dimensions = {object_size_[0], object_size_[1], object_size_[2]};
 
   geometry_msgs::msg::Pose p;
   p.position.x = pose.translation().x();
@@ -755,14 +750,14 @@ void ObjectFinder::createBox(Eigen::Affine3d& pose, const std::vector<double>& d
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-void ObjectFinder::createCylinder(Eigen::Affine3d& pose, const std::vector<double>& dim, std::size_t& numero) {
+void ObjectFinder::createCylinder(Eigen::Affine3d& pose) {
   moveit_msgs::msg::CollisionObject object;
-  object.id = "object" + std::to_string(numero);
+  object.id = "object";
   object.header.frame_id = "world";
   object.primitives.resize(1);
 
   object.primitives[0].type = shape_msgs::msg::SolidPrimitive::CYLINDER;
-  object.primitives[0].dimensions = {dim[0], dim[1]};
+  object.primitives[0].dimensions = {object_size_[0], object_size_[1]};
 
   geometry_msgs::msg::Pose p;
   p.position.x = pose.translation().x();
@@ -782,49 +777,44 @@ void ObjectFinder::createCylinder(Eigen::Affine3d& pose, const std::vector<doubl
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-void ObjectFinder::createObstacle(Eigen::Affine3d& pose, const std::vector<double>& dim, const Shape& type, std::size_t& numero) {
-  if (type == Shape::BOX)
-    createBox(pose, dim, numero);
-  if (type == Shape::CYLINDER)
-    createCylinder(pose, dim, numero);
+void ObjectFinder::createObstacle(Eigen::Affine3d& pose) {
+  if (type_object_ == SHAPE::BOX)
+    createBox(pose);
+  if (type_object_ == SHAPE::CYLINDER)
+    createCylinder(pose);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg) {
-  if (!begin_)
-    return;
-
+  RCLCPP_DEBUG(LOGGER, "Received point cloud");
+  cloud_received_ = true;
   pcl::fromROSMsg(*cloud_msg, *cloud_);
 
   retreiveObject();
+  // NOTE: tree_ is now set inside retreiveObject() on object_cloud_
 
-  if (cluster_indices_.empty())
+  if (cluster_indices_.empty()) {
+    RCLCPP_DEBUG(LOGGER, "No clusters found");
     return;
+  }
 
-  // _tab_score[cluster_idx][flat_object_idx] = match score of that cluster
-  // against that specific object *instance*.
-  // flat_object_idx runs over ALL instances of ALL objects, flattened:
-  //   object 0 instance 0, object 0 instance 1, ..., object 1 instance 0, ...
-  std::vector<std::vector<double>> _tab_score;
-  std::size_t cluster_num = 0;
+  std::vector<double> _tab_score;
+  _tab_score.reserve(cluster_indices_.size());
 
   for (const auto& _c : cluster_indices_) {
+    double _score = 0.0;
+
     // ── Build per-cluster cloud ───────────────────────────────────────
-    _tab_score.push_back(std::vector<double>());
-
-    object_cloud_->clear();
+    object_->clear();
     for (const auto& _idx : _c.indices)
-      object_cloud_->points.push_back(cluster_cloud_->points[_idx]);
+      object_->points.push_back(object_cloud_->points[_idx]);
 
-    object_cloud_->width = object_cloud_->size();
-    object_cloud_->height = 1;
-    object_cloud_->is_dense = true;
+    object_->width = object_->size();
+    object_->height = 1;
+    object_->is_dense = true;
 
-    if (object_cloud_->size() < 12) {
-      for (std::size_t n_object = 0; n_object < objects_.size(); n_object++)
-        for (std::size_t nb = 0; nb < objects_[n_object].number; nb++)
-          _tab_score[cluster_num].push_back(-1.0);
-      ++cluster_num;
+    if (object_->size() < 12) {
+      _tab_score.push_back(-1.0);
       continue;
     }
 
@@ -832,132 +822,138 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     Eigen::Vector4f _centroid;
     pcl::PointXYZ _min_OBB, _max_OBB, _pos_OBB;
     Eigen::Matrix3f _rot_OBB;
-    getCentroidAndOBB(object_cloud_, _centroid, _min_OBB, _max_OBB, _pos_OBB, _rot_OBB);
+    getCentroidAndOBB(object_, _centroid, _min_OBB, _max_OBB, _pos_OBB, _rot_OBB);
+
+    // Penality if object is high -- Concentrated on table
+    _score -= (_centroid[2] > 1.0) ? 0.5 : 0;
 
     double _dx = _max_OBB.x - _min_OBB.x;
     double _dy = _max_OBB.y - _min_OBB.y;
     double _dz = _max_OBB.z - _min_OBB.z;
 
-    std::vector<double> _dim = {_dx, _dy, _dz};
-    std::sort(_dim.begin(), _dim.end(), std::greater<double>());
+    std::vector<double> _dims = {_dx, _dy, _dz};
+    std::sort(_dims.begin(), _dims.end(), std::greater<double>());
+
+    // BUG FIX: was -= ; a high bounding match is a positive signal
+    _score += penality_factor_ * boundingScore(_dims);
 
     // ── Normal estimation (rebuild KdTree per cluster) ────────────────
+    // BUG FIX: tree_ was pointing to object_cloud_; rebuild on the cluster
     auto _cluster_tree = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
-    _cluster_tree->setInputCloud(object_cloud_);
+    _cluster_tree->setInputCloud(object_);
 
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> _ne;
-    _ne.setInputCloud(object_cloud_);
+    _ne.setInputCloud(object_);
     _ne.setSearchMethod(_cluster_tree);
     _ne.setKSearch(20);
 
     pcl::PointCloud<pcl::Normal>::Ptr _normals(new pcl::PointCloud<pcl::Normal>);
     _ne.compute(*_normals);
 
-    for (std::size_t n_object = 0; n_object < objects_.size(); n_object++) {
-      double _score = 0.0;
-      std::vector<double> object_dim = objects_[n_object].dimension;
-      Shape object_type = objects_[n_object].shape;
+    // Generic radial normal score (useful for sphere/cylinder, neutral for box)
+    double _ns = normalScore(object_, _normals, _centroid);
+    _score += _ns;
 
-      // Penalty if object is high above the table
-      _score -= (_centroid[2] > 1.0) ? 0.5 : 0;
+    // ── Shape-specific scoring ────────────────────────────────────────
+    if (type_object_ == SHAPE::BOX) {
+      // Two perpendicular faces → boost score
+      double _corner = cornerScore(object_);
+      _score += penality_factor_ * _corner;
 
-      _score += penality_factor_ * boundingScore(_dim, object_dim, object_type);
-
-      double _ns = normalScore(object_cloud_, _normals, _centroid);
-      _score += _ns;
-
-      if (object_type == Shape::BOX) {
-        double _corner = cornerScore(object_cloud_);
-        _score += penality_factor_ * _corner;
-
-        double _cyl = cylinderScore(object_cloud_, _normals, object_dim, object_type);
-        double _plane = planeScore(object_cloud_);
-        _score -= penality_factor_ * (_cyl + _plane) * 0.5;
-      }
-
-      if (object_type == Shape::CYLINDER) {
-        double _cyl = cylinderScore(object_cloud_, _normals, object_dim, object_type);
-        _score += penality_factor_ * _cyl;
-
-        double _corner = cornerScore(object_cloud_);
-        double _plane = planeScore(object_cloud_);
-        _score -= penality_factor_ * (_corner + _plane) * 0.5;
-      }
-
-      // Same score applies to every instance of this object type
-      for (std::size_t nb = 0; nb < objects_[n_object].number; nb++)
-        _tab_score[cluster_num].push_back(_score);
-    }
-    ++cluster_num;
-  }
-
-  // ── Assignment: greedily match each object instance to its best cluster ──
-  result_cloud_->clear();
-  std::size_t nb_cluster = cluster_indices_.size();
-  std::size_t flat_offset = 0;  // running offset into the flattened object-instance axis
-
-  for (std::size_t n_object = 0; n_object < objects_.size(); n_object++) {
-    auto type   = objects_[n_object].shape;
-    auto dim    = objects_[n_object].dimension;
-    auto number = objects_[n_object].number;
-    
-    objects_[n_object].poses.clear();
-
-    for (std::size_t counter = 0; counter < number; counter++) {
-      // Scores of every cluster against THIS specific instance
-      std::vector<double> tmp_score;
-      for (std::size_t n_cluster = 0; n_cluster < nb_cluster; n_cluster++)
-        tmp_score.push_back(_tab_score.at(n_cluster).at(flat_offset + counter));
-
-      // FIX: search tmp_score (per-instance scores), not _tab_score
-      // (max_element on a vector<vector<double>> compares rows
-      // lexicographically, not by actual score — that was the bug).
-      auto _it = std::max_element(tmp_score.begin(), tmp_score.end());
-      int _index = static_cast<int>(std::distance(tmp_score.begin(), _it));
-
-      RCLCPP_WARN(LOGGER, "CLUSTER : %d", _index);
-
-      // Mark this cluster's score as "used" for all instances of this object,
-      // so it can't be picked again. FIX: use flat_offset, not n_object.
-      for (std::size_t i = 0; i < number; i++)
-        _tab_score.at(_index).at(flat_offset + i) = 0.0;
-
-      object_cloud_->clear();
-      for (const auto& idx : cluster_indices_[_index].indices)
-        object_cloud_->points.push_back(cluster_cloud_->points[idx]);
-
-      RCLCPP_WARN(LOGGER, "SIZE : %ld", object_cloud_->points.size());
-
-      if (!object_cloud_->points.empty())
-        objects_[n_object].poses.push_back(centroidBias(object_cloud_, dim, type));
-
-      *result_cloud_ += *object_cloud_;
+      // Cylinder or single-plane fit → penalise
+      double _cyl = cylinderScore(object_, _normals);
+      double _plane = planeScore(object_);
+      // BUG FIX: penalty was sqrt(pow(a,factor)+pow(b,factor)) with
+      // factor=penality_factor_ as exponent — semantically wrong.
+      // Correct: weighted linear penalty.
+      _score -= penality_factor_ * (_cyl + _plane) * 0.5;
     }
 
-    flat_offset += number;
+    if (type_object_ == SHAPE::CYLINDER) {
+      double _cyl = cylinderScore(object_, _normals);
+      _score += penality_factor_ * _cyl;
+
+      double _corner = cornerScore(object_);
+      double _plane = planeScore(object_);
+      _score -= penality_factor_ * (_corner + _plane) * 0.5;
+    }
+
+    _tab_score.push_back(_score);
   }
 
-  sensor_msgs::msg::PointCloud2 _output;
-  pcl::toROSMsg(*result_cloud_, _output);
-  _output.header = cloud_msg->header;
-  pub_filtered_->publish(_output);
+  // ── Select best cluster ───────────────────────────────────────────────
+  auto _it = std::max_element(_tab_score.begin(), _tab_score.end());
+  int _index = static_cast<int>(std::distance(_tab_score.begin(), _it));
+
+  
+    // RCLCPP_WARN(LOGGER, "Best cluster index: %d  (score: %.3f)", _index, *_it);
+    // =====================================================================
+    // ── Rebuild object_ from best cluster ────────────────────────────────
+    object_->clear();
+    for (const auto& idx : cluster_indices_[_index].indices)
+      object_->points.push_back(object_cloud_->points[idx]);
+
+    if (!object_->points.empty()) {
+      centroidBias(object_, pose_);
+
+      visualization_msgs::msg::Marker _marker;
+      _marker.header.frame_id = "world";
+      _marker.header.stamp = rclcpp::Clock().now();
+
+      _marker.ns = "centroid";
+      _marker.id = 0;
+      _marker.type = visualization_msgs::msg::Marker::SPHERE;
+      _marker.action = visualization_msgs::msg::Marker::ADD;
+
+      // Position = your centroid
+      _marker.pose.position.x = pose_.translation().x();
+      _marker.pose.position.y = pose_.translation().y();
+      _marker.pose.position.z = pose_.translation().z();
+
+      // No rotation needed
+      _marker.pose.orientation.w = 1.0;
+
+      // Size of the sphere
+      _marker.scale.x = 0.02;
+      _marker.scale.y = 0.02;
+      _marker.scale.z = 0.02;
+
+      // Color (red here)
+      _marker.color.r = 1.0;
+      _marker.color.g = 0.0;
+      _marker.color.b = 0.0;
+      _marker.color.a = 1.0;
+
+      pub_centroid_->publish(_marker);
+    }
+
+    // =====================================================================
+    // ── Remove target from remaining cloud and re-add table ──────────────
+    pcl::PointIndices::Ptr _best_indices(new pcl::PointIndices);
+    _best_indices->indices = cluster_indices_[_index].indices;
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr _no_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::ExtractIndices<pcl::PointXYZ> _extract;
+    _extract.setInputCloud(object_cloud_);
+    _extract.setIndices(_best_indices);
+    _extract.setNegative(true);
+    _extract.filter(*_no_cloud);
+
+    if (!_no_cloud->points.empty())
+    {
+      RCLCPP_DEBUG(LOGGER, "Result fill");
+      header_ = cloud_msg->header;
+
+      *result_cloud_ = *_no_cloud;
+      *result_cloud_ += *table_;  // BUG FIX: was a manual loop; use PCL concatenation
+      
+      result_cloud_->width = result_cloud_->points.size();
+      result_cloud_->height = 1;
+      result_cloud_->is_dense = true;
+    }
 
   cluster_indices_.clear();
-
-  // ── Construction of collision objects ─────────────────────────────────
-  RCLCPP_INFO(LOGGER, "Creation");
-  for (std::size_t n_object = 0; n_object < objects_.size(); n_object++) {
-    auto type = objects_[n_object].shape;
-    auto dim  = objects_[n_object].dimension;
-
-    for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
-      auto pose = objects_[n_object].poses[counter];
-      RCLCPP_WARN(LOGGER, "POSITION : %f, %f, %f",
-                  pose.translation().x(), pose.translation().y(), pose.translation().z());
-      createObstacle(pose, dim, type, counter);
-    }
   }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 int main(int argc, char* argv[]) {

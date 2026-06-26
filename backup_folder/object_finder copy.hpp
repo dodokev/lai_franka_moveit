@@ -2,7 +2,6 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include <std_msgs/msg/string.hpp>
 
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -23,37 +22,26 @@
 
 #include <visualization_msgs/msg/marker.hpp>
 
-enum Shape { NONE, SPHERE, CYLINDER, BOX };
-
-struct Object {
-  const Shape shape;
-  const std::vector<double> dimension;
-  
-  unsigned int number;
-  std::vector<Eigen::Affine3d> poses;
-
-  Object(Shape& s, std::vector<double>& v) : shape(s), dimension(v), number(1) {}
-};
-
-
 class ObjectFinder : public rclcpp::Node {
  public:
+  enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
   ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps);
   ~ObjectFinder() = default;
 
  private:
   /* data */
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_unfilter_;
-  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_size_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_filtered_;
 
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_centroid_;
+
+  rclcpp::TimerBase::SharedPtr timer_;
+
   pcl::PointCloud<pcl::PointXYZ>::Ptr table_;
-  Eigen::Vector3d table_normal_;
-  double table_d_;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_cloud_;
   pcl::PointCloud<pcl::PointXYZ>::Ptr object_cloud_;
+  pcl::PointCloud<pcl::PointXYZ>::Ptr object_;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr result_cloud_;
 
@@ -61,17 +49,14 @@ class ObjectFinder : public rclcpp::Node {
 
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree_;
 
-  std::vector<Object> objects_;
+  std::vector<double> object_size_;
+  SHAPE type_object_;
 
-  moveit::planning_interface::PlanningSceneInterface* planning_scene_;
-
+  std_msgs::msg::Header header_;
 
   double penality_factor_{1.1};
-  bool begin_{false};
 
   void filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud);
-  void request_callback(const std_msgs::msg::String::SharedPtr msg);
-
   void retreiveObject();
   void getCentroidAndOBB(pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud,
                          Eigen::Vector4f& centroid,
@@ -80,7 +65,7 @@ class ObjectFinder : public rclcpp::Node {
                          pcl::PointXYZ& center,
                          Eigen::Matrix3f& rot);
 
-  double boundingScore(const std::vector<double>& dim, const std::vector<double>& ground_dim, const Shape& type);
+  double boundingScore(std::vector<double> dim);
 
   double normalScore(pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud,
                      pcl::PointCloud<pcl::Normal>::Ptr normals,
@@ -89,13 +74,22 @@ class ObjectFinder : public rclcpp::Node {
   double planeScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud);
   double cornerScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud);
   double cylinderScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
-                       pcl::PointCloud<pcl::Normal>::Ptr normals, const std::vector<double>& dim, const Shape& type);
+                       pcl::PointCloud<pcl::Normal>::Ptr normals);
 
-  Eigen::Affine3d centroidBias(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, const std::vector<double>& dim, const Shape& type);
-  Eigen::Affine3d centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, const std::vector<double>& dim);
-  Eigen::Affine3d centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, const std::vector<double>& dim);
+  // Planning Scene Interface
+  moveit::planning_interface::PlanningSceneInterface* planning_scene_;
+
+  void centroidBias(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, Eigen::Affine3d& pose);
+  void centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, Eigen::Affine3d& pose);
+  void centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, Eigen::Affine3d& pose);
     
-  void createObstacle(Eigen::Affine3d& pose, const std::vector<double>& dim, const Shape& type, std::size_t& numero);
-  void createBox(Eigen::Affine3d& pose, const std::vector<double>& dim, std::size_t& numero);
-  void createCylinder(Eigen::Affine3d& pose, const std::vector<double>& dim, std::size_t& numero);
+  void createObstacle(Eigen::Affine3d& pose);
+  void createBox(Eigen::Affine3d& pose);
+  void createCylinder(Eigen::Affine3d& pose);
+
+  void update();
+
+  Eigen::Affine3d pose_;
+  bool created_{false};
+  bool cloud_received_{false};
 };

@@ -224,7 +224,7 @@ def generate_launch_description():
 
 
     ros2_controllers_path = os.path.join(
-        get_package_share_directory('franka_fr3_moveit_config'),
+        get_package_share_directory('franka_moveit_config'),
         'config',
         'fr3_ros_controllers.yaml',
     )
@@ -243,7 +243,7 @@ def generate_launch_description():
 
     # Load controllers
     load_controllers = []
-    for controller in ['fr3_arm_controller', 'joint_state_broadcaster']:
+    for controller in ['fr3_arm_controller', 'fr3_gripper_controller', 'joint_state_broadcaster']:
         load_controllers.append(
             ExecuteProcess(
                 cmd=[

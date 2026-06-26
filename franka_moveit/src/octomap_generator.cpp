@@ -14,8 +14,7 @@ OctomapGenerator::OctomapGenerator()
     planning_scene_pub_ = this->create_publisher<moveit_msgs::msg::PlanningScene>("planning_scene", 10);
 
     sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-        "/visualize_cloud",
-        // "/camera/camera/depth/color/points",
+        "/octocloud",
         rclcpp::SensorDataQoS(),
         std::bind(&OctomapGenerator::cloudCallback, this, std::placeholders::_1));
 

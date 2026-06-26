@@ -3,7 +3,9 @@
 #include <moveit/task_constructor/solvers.h>
 #include <moveit/task_constructor/stages.h>
 #include <moveit/task_constructor/task.h>
+
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 
 #include <moveit/task_constructor/cost_terms.h>
 
@@ -19,10 +21,6 @@
 #include <tf2_eigen/tf2_eigen.h>
 #endif
 
-#include <franka_msgs/action/grasp.hpp>
-#include <franka_msgs/action/move.hpp>
-#include <rclcpp_action/rclcpp_action.hpp>
-
 #include <moveit/task_constructor/solvers/multi_planner.h>
 
 #include <functional>
@@ -30,20 +28,29 @@
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 namespace mtc = moveit::task_constructor;
 
+// #include <moveit_task_constructor_msgs/msg/solution_info.hpp>
+// #include <moveit_task_constructor_msgs/action/execute_task_solution.hpp>
+
+using ExecuteTaskSolutionAction = moveit_task_constructor_msgs::action::ExecuteTaskSolution;
+
 class MTCTaskNode {
  public:
   enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
 
   MTCTaskNode(const rclcpp::NodeOptions& options);
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
-  void doTask();
   void setupPlanningScene();
   bool setupPlanner();
+  
+  void doTask();
 
- private:
+private:
   // Compose an MTC task from a series of stages.
   void createPickTask();
   void createPlaceTask();
+
+  void fillTask();
+  bool executeTask();
 
   void addCurrentStage();
 
@@ -79,11 +86,13 @@ class MTCTaskNode {
   std::string hand_group_name_;
   std::string hand_frame_;
 
-  bool security{false};
+  std::string stage_failed_{""};
+  unsigned int recovery_allowed_{2};
+  unsigned int recovery_done_{0};
 };
 
 MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
-    : node_{std::make_shared<rclcpp::Node>("mtc_node", options)} {
+  : node_{std::make_shared<rclcpp::Node>("mtc_node", options)} {
   position_.x = 0.5;
   position_.y = -0.25;
   position_.z = 0.0;
@@ -260,12 +269,16 @@ void MTCTaskNode::createPickTask() {
 
   auto clearance_predicate = makeClearancePredicate();
 
+  auto serial = std::make_unique<mtc::SerialContainer>("PickTask");
+  task_.properties().exposeTo(serial->properties(), {"eef", "group", "ik_frame"});
+  serial->properties().configureInitFrom(mtc::Stage::PARENT, {"eef", "group", "ik_frame"});
+
   {
     auto stage_open_hand =
         std::make_unique<mtc::stages::MoveTo>("openHand", interpolation_planner_);
     stage_open_hand->setGroup(hand_group_name_);
     stage_open_hand->setGoal("open");
-    task_.add(std::move(stage_open_hand));
+    serial->insert(std::move(stage_open_hand));
   }
 
   {
@@ -276,7 +289,7 @@ void MTCTaskNode::createPickTask() {
 
     auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2pick", std::move(stage));
     wrapper->setPredicate(clearance_predicate);
-    task_.add(std::move(wrapper));
+    serial->insert(std::move(wrapper));
   }
 
   {
@@ -397,7 +410,7 @@ void MTCTaskNode::createPickTask() {
       alternate->add(std::move(alt));
     }
 
-    task_.add(std::move(alternate));
+    serial->insert(std::move(alternate));
   }
 
   {
@@ -430,7 +443,7 @@ void MTCTaskNode::createPickTask() {
       container->insert(std::move(stage));
     }
 
-    task_.add(std::move(container));
+    serial->insert(std::move(container));
   }
 
   {
@@ -444,8 +457,10 @@ void MTCTaskNode::createPickTask() {
     vec.header.frame_id = "world";
     vec.vector.z = 1.0;
     stage->setDirection(vec);
-    task_.add(std::move(stage));
+    serial->insert(std::move(stage));
   }
+
+  task_.add(std::move(serial));
 }
 
 void MTCTaskNode::createPlaceTask() {
@@ -457,6 +472,10 @@ void MTCTaskNode::createPlaceTask() {
 
   auto clearance_predicate = makeClearancePredicate();
 
+  auto serial = std::make_unique<mtc::SerialContainer>("PlaceTask");
+  task_.properties().exposeTo(serial->properties(), {"eef", "group", "ik_frame"});
+  serial->properties().configureInitFrom(mtc::Stage::PARENT, {"eef", "group", "ik_frame"});
+
   {
     auto stage_move_to_place = std::make_unique<mtc::stages::Connect>(
         "CONNECT",
@@ -466,7 +485,7 @@ void MTCTaskNode::createPlaceTask() {
     auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2place",
                                                                   std::move(stage_move_to_place));
     wrapper->setPredicate(clearance_predicate);
-    task_.add(std::move(wrapper));
+    serial->insert(std::move(wrapper));
   }
 
   {
@@ -512,7 +531,7 @@ void MTCTaskNode::createPlaceTask() {
       container->insert(std::move(wrapper));
     }
 
-    task_.add(std::move(container));
+    serial->insert(std::move(container));
   }
 
   {
@@ -543,7 +562,7 @@ void MTCTaskNode::createPlaceTask() {
       container->insert(std::move(stage));
     }
 
-    task_.add(std::move(container));
+    serial->insert(std::move(container));
   }
   
   {
@@ -557,30 +576,73 @@ void MTCTaskNode::createPlaceTask() {
     vec.header.frame_id = hand_frame_;
     vec.vector.z = -1.0;
     stage->setDirection(vec);
-    task_.add(std::move(stage));
+    serial->insert(std::move(stage));
   }
 
   {
     auto stage = std::make_unique<mtc::stages::MoveTo>("returnHome", multipipeline_planner_);
     stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
     stage->setGoal("ready");
-    task_.add(std::move(stage));
+    serial->insert(std::move(stage));
   }
 
   {
     auto stage = std::make_unique<mtc::stages::MoveTo>("closeHand", interpolation_planner_);
     stage->setGroup(hand_group_name_);
     stage->setGoal("close");
-    task_.add(std::move(stage));
+    serial->insert(std::move(stage));
   }
+
+  task_.add(std::move(serial));
+}
+
+void MTCTaskNode::fillTask()
+{
+  addCurrentStage();
+  if (stage_failed_ == "PickTask" || stage_failed_ == "") {
+    createPickTask();
+    createPlaceTask();
+  }
+  else if (stage_failed_ == "PlaceTask") {
+    createPlaceTask();
+  }
+}
+
+bool MTCTaskNode::executeTask()
+{
+  auto solution = task_.solutions().front();
+
+  auto container = task_.stages();
+  std::vector<std::string> stage_names;
+  RCLCPP_WARN(LOGGER, "NB Stage : %ld", container->numChildren());
+  for (std::size_t i = 0; i < container->numChildren(); i++) {
+    RCLCPP_INFO(LOGGER, "Stage %ld name : %s", i, ((*container)[i]->name()).c_str());
+    stage_names.push_back((*container)[i]->name());
+  }
+
+  const auto* seq = dynamic_cast<const mtc::SolutionSequence*>(solution.get());
+  for (auto* s : seq->solutions())
+  {
+    const auto* c = s->creator();
+    stage_failed_ = c->name();
+    RCLCPP_WARN(LOGGER, "Stage executing : %s", stage_failed_.c_str());
+
+    auto result = task_.execute(*s);
+    if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
+    { 
+      RCLCPP_WARN(LOGGER, "Stage failed : %s", stage_failed_.c_str());
+      RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void MTCTaskNode::doTask() {
   task_.clear();
 
-  addCurrentStage();
-  createPickTask();
-  createPlaceTask();
+  fillTask();
 
   try {
     task_.init();
@@ -594,33 +656,22 @@ void MTCTaskNode::doTask() {
     return;
   }
 
-  auto solution = task_.solutions().front();
-
-  auto container = task_.stages();
-  std::vector<std::string> stage_names;
-  RCLCPP_WARN(LOGGER, "NB Stage : %ld", container->numChildren());
-  for (std::size_t i = 0; i < container->numChildren(); i++) {
-    RCLCPP_WARN(LOGGER, "Stage %ld name : %s", i, ((*container)[i]->name()).c_str());
-    stage_names.push_back((*container)[i]->name());
+  if(!executeTask())
+  {
+    if (recovery_done_ < recovery_allowed_)
+    {
+      ++recovery_done_;
+      RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);
+      return doTask();
+    }
+    else
+    {
+      RCLCPP_ERROR(LOGGER, "No more recovery possible");
+      return;
+    }
   }
-  
-  // auto sequence = dynamic_cast<mtc::SolutionSequence>(solution);
-  // for (auto& s : sequence->solutions())
-  // {
-  //   RCLCPP_WARN(LOGGER, "COMMENT : %s", s->comment().c_str());
-  // }
 
-  // auto result = task_.execute(*task_.solutions().front());
-  // if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS && !security)
-  // {
-  //   RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
-  //   RCLCPP_ERROR(LOGGER, "Lets Retry");
-
-  //   security = true;
-
-  //   doTask();
-  // }
-
+  RCLCPP_INFO(LOGGER, "Execution done");
   return;
 }
 
@@ -639,16 +690,8 @@ int main(int argc, char** argv) {
     executor.remove_node(mtc_task_node->getNodeBaseInterface());
   });
 
-  
   mtc_task_node->setupPlanner();
   mtc_task_node->setupPlanningScene();
-
-  moveit::planning_interface::PlanningSceneInterface psi;
-  auto objects = psi.getObjects();
-
-  for (auto& obj : objects)
-    RCLCPP_WARN(LOGGER, "obj name : %s", obj.first.c_str());
-  
   mtc_task_node->doTask();
 
   spin_thread->join();

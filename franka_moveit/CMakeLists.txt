@@ -31,6 +31,7 @@ add_executable(outlier_filter src/outlier_filter.cpp)
 add_executable(octomap_generator src/octomap_generator.cpp)
 
 add_executable(object_finder src/object_finder.cpp)
+add_executable(object_remover src/object_remover.cpp)
 add_executable(bridge_franka src/bridge_franka.cpp)
 
 # ================================================================================
@@ -61,6 +62,9 @@ target_include_directories(octomap_generator PUBLIC
   $<INSTALL_INTERFACE:include>)
   
 target_include_directories(object_finder PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_include_directories(object_remover PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_include_directories(bridge_franka PUBLIC
@@ -123,6 +127,13 @@ ament_target_dependencies(
   pcl_ros
 )
 ament_target_dependencies(
+  object_remover
+  "rclcpp"
+  "moveit_ros_planning_interface"
+  tf2
+  pcl_ros
+)
+ament_target_dependencies(
   bridge_franka
   "rclcpp"
   "moveit_ros_planning_interface"
@@ -143,6 +154,7 @@ target_compile_features(outlier_filter PUBLIC c_std_99 cxx_std_17)
 target_compile_features(octomap_generator PUBLIC c_std_99 cxx_std_17)
 
 target_compile_features(object_finder PUBLIC c_std_99 cxx_std_17)
+target_compile_features(object_remover PUBLIC c_std_99 cxx_std_17)
 target_compile_features(bridge_franka PUBLIC c_std_99 cxx_std_17)
 
 # ================================================================================
@@ -150,7 +162,7 @@ target_compile_features(bridge_franka PUBLIC c_std_99 cxx_std_17)
 
 install(TARGETS franka_moveit explore_nullspace simple_movement
   cloud_transform outlier_filter octomap_generator
-  object_finder bridge_franka statistic_exp
+  object_finder object_remover bridge_franka statistic_exp
 DESTINATION lib/${PROJECT_NAME})
 
 # ================================================================================

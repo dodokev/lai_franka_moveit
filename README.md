@@ -46,24 +46,72 @@ The parameters to change, in the yaml file, are the tag's family and his size, o
 
 After launching the previous nodes, you will need to run and/or launch two others nodes.
 ```
-ros2 run franka_moveit outlier_filter.cpp
+ros2 run franka_moveit outlier_filter
 ```
-The outlier filter will reduced the point cloud and remove some outliers clusters.
+The outlier filter will reduced the point cloud and remove some outliers clusters. It is also launch with the camera. So you don't need the run it in a separate terminal.
 
 ```
-ros2 launch franka_moveit object_finder.launch.py size:="{size}"
-```
-The object finder needs a parameter to find and remove a object from the point cloud. {size} is a string of 1 to 3 dimensions expressed in meters. The dimensions are separeted with a comma, moreover the number of dimensions determined the shape of the object (Only three shapes possibles).
-
-```
--- SPHERE : "radius"
-ros2 launch franka_moveit object_finder.launch.py size:="0.2" 
-
--- CYLINDER : "heigth,radius"
-ros2 launch franka_moveit object_finder.launch.py size:="0.206,0.034" 
-
--- BOX : "longest,mid,shortest"
-ros2 launch franka_moveit object_finder.launch.py size:="0.255,0.153,0.112" 
+ros2 run franka_moveit object_finder
+ros2 run franka_moveit object_remover
 ```
 
-    
+Those two nodes allow to find and remove from objects from the point cloud. They will be runned through a launch file.
+```
+ros2 launch franka_moveit object_updater
+```
+
+To add a object to find, you will need to send a message to the /add_lost_obj topic.
+
+```
+ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: 'SIZE'}"
+```
+
+SIZE has to be replaced by the size in meters of your object. The dimensions are separated by a comma. Each shapes have their syntax fot the variable.
+Here some examples : 
+
+```
+// -- SPHERE : [radius]
+ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.2'}"
+
+// -- CYLINDER : [height,radius]
+ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.206,0.034'}"
+
+// -- BOX : [longest,..,shortest]
+ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.255,0.153,0.112'}"
+```
+
+## MoveIt2
+
+To plan or do task, we need to launch the components for MoveIt2. As we use the fr3 Emika Robot, only the launch file for the fr3 is created.
+
+```
+ros2 launch fr3_moveit_controller.launch.py robot_ip:=IP use_fake_hardware:=[true|false]
+```
+
+When the FCI of the franka robot is activate, only use the robot_ip argument and change IP by the IP used by the robot.
+If you want stay in simulation, use the use_fake_hardware argument and put anything in robot_ip argument.
+
+Example :
+```
+// -- FCI
+ros2 launch fr3_moveit_controller.launch.py robot_ip:=172.16.0.2
+
+// -- Simulation
+ros2 launch fr3_moveit_controller.launch.py robot_ip:=dont-care use_fake_hardware:=true
+```
+
+The gripper used in the simulation is different from the real gripper of the franka_ros2 package. So if you send an action or anything related to the gripper in simulation, you have to modify your code for the real gripper.
+
+### Simple Planning
+
+To use the planning part, you have two choices, using the rviz2 interface or using some code.
+In rviz2, there is a component called MotionPlanning. From the dedicated panel, you can change the planning algorithm and parameters, modify the scene to add obstacles, and of course plan and execute a path.
+
+There is launch files in the franka_moveit package that allow to plan and execute.
+
+If you want a simple movement (from the current pose to a goal pose). This command will be used, however the goal has to be modified manually in the code.
+```
+ros2 launch franka_moveit simple.launch.py
+```
+
+
