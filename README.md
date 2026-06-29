@@ -114,4 +114,18 @@ If you want a simple movement (from the current pose to a goal pose). This comma
 ros2 launch franka_moveit simple.launch.py
 ```
 
+### Exploring the nullspace
+
+This launch file allow to explore the robot nullspace and plan the path from the current configuration to a goal pose. The start pose and the goal are hardcoded in the 
+
+// REVIEW THE EXPLORE NULLSPACE EXECUTABLE
+
+### Franka Service Class
+
+If you are annoyed to hard coded the goal pose, then you can launch the service node for MoveIt
+```
+ros2 launch franka_moveit franka.launch.py
+```
+
+// REDO THE FRANKA SERVICE NODE
 

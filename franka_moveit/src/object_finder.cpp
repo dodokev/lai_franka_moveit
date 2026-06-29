@@ -47,13 +47,18 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
       if (obj.dimension == _dim)
       {
         ++(obj.number);
+        obj.created.push_back(false);
+        
         exist = true;
         break;
       }
   }
     
   if (!exist)
+  {
     objects_.push_back(Object(_type, _dim));
+    objects_.back().created.push_back(false);
+  }
   
   begin_ = true;
   RCLCPP_WARN(LOGGER, "New object to find");
@@ -62,43 +67,54 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
 // ────────────────────────────────────────────────────────────────────────────
 void ObjectFinder::retreiveObject() {
 
+  pcl::PassThrough<pcl::PointXYZ> pass;
+  pass.setFilterFieldName("x");
+  pass.setFilterLimits(-0.25, 0.5); // TUNE (-0.25, 1.0)
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cropped(new pcl::PointCloud<pcl::PointXYZ>);
+  pass.setInputCloud(cloud_);
+  pass.filter(*cropped);
+
+  
   pcl::SACSegmentation<pcl::PointXYZ> _seg;
   _seg.setOptimizeCoefficients(true);
   _seg.setModelType(pcl::SACMODEL_PLANE);
   _seg.setMethodType(pcl::SAC_RANSAC);
   _seg.setDistanceThreshold(0.02);
-  _seg.setInputCloud(cloud_);
+  // _seg.setInputCloud(cloud_);
+  _seg.setInputCloud(cropped);
 
   // Eigen::Vector3f z(0, 0, 1);
   // _seg.setAxis(z);
   // _seg.setEpsAngle(M_PI / 64);
-
+  
   pcl::PointIndices::Ptr _inliers(new pcl::PointIndices);
   pcl::ModelCoefficients::Ptr _coefficients(new pcl::ModelCoefficients);
   _seg.segment(*_inliers, *_coefficients);
 
   pcl::ExtractIndices<pcl::PointXYZ> _extract;
-  _extract.setInputCloud(cloud_);
+  // _extract.setInputCloud(cloud_);
+  _extract.setInputCloud(cropped);
   _extract.setIndices(_inliers);
-
+  
   _extract.setNegative(false);
   _extract.filter(*table_);
 
+  
   /**
    * Save table information
    */
   table_normal_ = Eigen::Vector3d(_coefficients->values[0], _coefficients->values[1], _coefficients->values[2]).normalized();
   if (table_normal_.z() < 0) table_normal_ = -table_normal_; // point "up"
-    table_d_ = _coefficients->values[3];
-
-  RCLCPP_INFO_STREAM(LOGGER, "TAble normal : " << table_normal_);
+    // table_d_ = _coefficients->values[3];
+    table_d_ = 0.0;
 
   _extract.setNegative(true);
   _extract.filter(*cluster_cloud_);
 
   // BUG FIX: tree must be set before EuclideanClusterExtraction uses it
   tree_->setInputCloud(cluster_cloud_);
-
+  
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> _ec;
   _ec.setClusterTolerance(0.05);
   _ec.setMinClusterSize(20);
@@ -323,18 +339,14 @@ double ObjectFinder::cylinderScore(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud
 // ────────────────────────────────────────────────────────────────────────────
 Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
                                    const std::vector<double>& dim) {
-  // ---------------------------
   Eigen::Affine3d pose;
 
-  // 1. Compute centroid
-  // ---------------------------
+  // 1. Centroid
   Eigen::Vector4f centroid4;
   pcl::compute3DCentroid(*obj_cloud, centroid4);
   Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
 
-  // ---------------------------
-  // 2. Plane segmentation (up to 3 planes)
-  // ---------------------------
+  // 2. Plane segmentation (unchanged from your version)
   pcl::SACSegmentation<pcl::PointXYZ> seg;
   seg.setOptimizeCoefficients(true);
   seg.setModelType(pcl::SACMODEL_PLANE);
@@ -346,35 +358,27 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
 
   struct PlaneInfo {
     Eigen::Vector3d normal;
-    Eigen::Vector3d mean_point;  // a point on the plane (inlier centroid)
-    double alignment;
+    Eigen::Vector3d mean_point;
+    double alignment;   // |dot| with table_normal_
+    int inlier_count;
   };
   std::vector<PlaneInfo> planes;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr remaining(new pcl::PointCloud<pcl::PointXYZ>(*obj_cloud));
-
-  // Require at least 5% of remaining cloud to accept a plane
   const float min_inlier_ratio = 0.05f;
-
-  double threshold = 0.1;
+  const double threshold = 0.1;  // band around 0 / 1 considered "ambiguous"
 
   for (int i = 0; i < 5; ++i) {
-    if (remaining->size() < 20)
-      break;
+    if (remaining->size() < 20) break;
 
     pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
     pcl::ModelCoefficients::Ptr coeff(new pcl::ModelCoefficients);
-
     seg.setInputCloud(remaining);
     seg.segment(*inliers, *coeff);
 
-    if (inliers->indices.empty())
-      break;
+    if (inliers->indices.empty()) break;
+    if ((float)inliers->indices.size() / (float)remaining->size() < min_inlier_ratio) break;
 
-    if ((float)inliers->indices.size() / (float)remaining->size() < min_inlier_ratio)
-      break;
-
-    // Compute the centroid of inliers → a point on this face
     pcl::PointCloud<pcl::PointXYZ>::Ptr face_cloud(new pcl::PointCloud<pcl::PointXYZ>);
     extract.setInputCloud(remaining);
     extract.setIndices(inliers);
@@ -388,115 +392,110 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
     Eigen::Vector3d normal(coeff->values[0], coeff->values[1], coeff->values[2]);
     normal.normalize();
 
-    // Remove inliers and continue
     pcl::PointCloud<pcl::PointXYZ>::Ptr tmp(new pcl::PointCloud<pcl::PointXYZ>);
     extract.setNegative(true);
     extract.filter(*tmp);
     remaining = tmp;
 
     double align = std::abs(normal.dot(table_normal_));
-    if (align > threshold && align < (1 - threshold))
-    {
-      RCLCPP_DEBUG(LOGGER, "align %f", align);
-      continue;
+    if (align > threshold && align < (1 - threshold)) {
+      RCLCPP_DEBUG(LOGGER, "rejected ambiguous plane, align=%f", align);
+      continue;  // neither clearly horizontal nor clearly vertical -> discard
     }
 
-    // Orient normal to point AWAY from the cloud centroid
-    // (i.e. outward-facing, toward the sensor)
     if (normal.dot(face_centroid - centroid) < 0)
       normal = -normal;
 
-    planes.push_back({normal, face_centroid, align});
+    planes.push_back({normal, face_centroid, align, (int)inliers->indices.size()});
   }
 
-  if (planes.size() < 2) {
-    // Fallback: PCA only, no bias
-    RCLCPP_WARN(LOGGER, "centroidBias: fewer than 2 planes found, falling back to PCA centroid.");
+  if (planes.empty()) {
+    RCLCPP_WARN(LOGGER, "centroidBias: no usable planes found, falling back to PCA centroid.");
     pose.linear() = Eigen::Matrix3d::Identity();
     pose.translation() = centroid;
     return pose;
   }
 
-  std::sort(planes.begin(), planes.end(), [&threshold](PlaneInfo& p1, PlaneInfo& p2)
-  {
-    double v1 = std::min(std::fabs(p1.alignment - threshold), std::fabs(p1.alignment - 1 + threshold));
-    double v2 = std::min(std::fabs(p2.alignment - threshold), std::fabs(p2.alignment - 1 + threshold));
-
-    // double v1 = std::fabs(p1.alignment - threshold);
-    // double v2 = std::fabs(p2.alignment - threshold);
-
-    return v1 < v2;
-
-    // return p1.alignment < p2.alignment;
-  });
-
   // ---------------------------
-  // 3. Build orthonormal frame from the two best normals
-  //
-  //  n0, n1 are two outward face normals → they are (ideally) orthogonal.
-  //  Their cross product gives the third box axis (the "edge" direction).
+  // 3. Anchor vertical axis to table_normal_ (trusted, low-noise prior)
   // ---------------------------
-  Eigen::Vector3d n0 = planes[0].normal;
-  Eigen::Vector3d n1 = planes[1].normal;
+  Eigen::Vector3d z_up = table_normal_.normalized();
 
-  // Sanity: normals should be roughly perpendicular for a box
-  double dot = std::abs(n0.dot(n1));
-  if (dot > 0.3)  // ~17° from parallel — something went wrong
-  {
-    RCLCPP_DEBUG(
-        rclcpp::get_logger("object_finder"),
-        "centroidBias: plane normals are not perpendicular (|dot|=%.2f), result may be unreliable.",
-        dot);
-  }
-
-  // Third axis = edge shared by the two visible faces
-  Eigen::Vector3d n2 = n0.cross(n1).normalized();
-
-  // Re-orthogonalize for numerical stability
-  n1 = n2.cross(n0).normalized();
-  n0 = n1.cross(n2).normalized();  // now all three are truly orthonormal
-
-  // ---------------------------
-  // 4. Map axes → box dimensions
-  //
-  //  We want the longest dimension along Z, but we don't force it
-  // ---------------------------
-  // Candidate axes and known half-lengths
-  std::array<Eigen::Vector3d, 3> axes = {n0, n1, n2};
-  std::array<double, 3> sizes = {
-      dim[0],  // longest
-      dim[1],
-      dim[2]  // shortest
+  // Split planes into "horizontal-ish" (top/bottom face, align near 1)
+  // and "vertical-ish" (side face, align near 0), keep the most-confident
+  // (most extreme alignment, NOT closest to threshold) of each.
+  auto confidence = [&](const PlaneInfo& p) {
+    return std::min(p.alignment, 1.0 - p.alignment);  // smaller = more confident
   };
 
-  // Sort sizes descending
+  PlaneInfo* best_horizontal = nullptr;
+  PlaneInfo* best_vertical   = nullptr;
+  for (auto& p : planes) {
+    if (p.alignment > 0.5) {  // horizontal-ish (parallel to table normal)
+      if (!best_horizontal || confidence(p) < confidence(*best_horizontal))
+        best_horizontal = &p;
+    } else {                   // vertical-ish (perpendicular to table normal)
+      if (!best_vertical || confidence(p) < confidence(*best_vertical))
+        best_vertical = &p;
+    }
+  }
+
+  // Side-face normal resolves yaw. Snap it to be EXACTLY perpendicular to
+  // z_up by removing any component along z_up — this is the step that
+  // kills most of the angular noise from a slightly tilted RANSAC fit.
+  Eigen::Vector3d x_axis;
+  bool have_side_normal = false;
+  if (best_vertical) {
+    Eigen::Vector3d n = best_vertical->normal;
+    n -= n.dot(z_up) * z_up;
+    if (n.norm() > 1e-6) {
+      x_axis = n.normalized();
+      have_side_normal = true;
+    }
+  }
+
+  // RCLCPP_INFO(LOGGER, "X AXIS ");
+  // RCLCPP_WARN_STREAM(LOGGER, "" << x_axis);
+
+  if (!have_side_normal) {
+    // No reliable side face — fall back to PCA on the horizontal plane
+    // to at least get a consistent (if possibly less semantically
+    // meaningful) yaw.
+    RCLCPP_WARN(LOGGER, "centroidBias: no vertical side face found, yaw is unconstrained.");
+    // Pick an arbitrary axis perpendicular to z_up, deterministic.
+    Eigen::Vector3d arbitrary = std::abs(z_up.x()) < 0.9 ? Eigen::Vector3d::UnitX() : Eigen::Vector3d::UnitY();
+    x_axis = (arbitrary - arbitrary.dot(z_up) * z_up).normalized();
+  }
+
+  Eigen::Vector3d y_axis = z_up.cross(x_axis).normalized();
+  x_axis = y_axis.cross(z_up).normalized();  // re-orthogonalize
+
+  std::array<Eigen::Vector3d, 3> axes = {x_axis, y_axis, z_up};
+
+  // ---------------------------
+  // 4. Match axes to known box dimensions via observed extent (same idea
+  //    as your original, but axes are now far more stable)
+  // ---------------------------
+  std::array<double, 3> sizes = {dim[0], dim[1], dim[2]};
   std::array<int, 3> size_order = {0, 1, 2};
   std::sort(size_order.begin(), size_order.end(),
             [&](int a, int b) { return sizes[a] > sizes[b]; });
 
-  // Assign: PCA on the three axes to match sizes
-  // (use the spread of the cloud projected onto each axis)
   std::array<double, 3> extents;
   for (int i = 0; i < 3; ++i) {
-    float min_proj = 1e9f;
-    float max_proj = -1e9f;
+    float min_proj = 1e9f, max_proj = -1e9f;
     for (const auto& pt : *obj_cloud) {
-      Eigen::Vector3d p(pt.x, pt.y, pt.z);
-      double proj = p.dot(axes[i]);
+      double proj = Eigen::Vector3d(pt.x, pt.y, pt.z).dot(axes[i]);
       min_proj = std::min(min_proj, (float)proj);
       max_proj = std::max(max_proj, (float)proj);
     }
     extents[i] = max_proj - min_proj;
   }
 
-  // Sort axes by observed extent (descending)
   std::array<int, 3> axis_order = {0, 1, 2};
   std::sort(axis_order.begin(), axis_order.end(),
             [&](int a, int b) { return extents[a] > extents[b]; });
 
-  // axis_order[k] is the axis index with the k-th largest extent
-  // size_order[k] is the dimension index with the k-th largest size
-  // → axis axis_order[k] corresponds to dimension size_order[k]
   std::array<double, 3> half_sizes;
   std::array<Eigen::Vector3d, 3> sorted_axes;
   for (int k = 0; k < 3; ++k) {
@@ -504,57 +503,38 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
     half_sizes[k] = sizes[size_order[k]] / 2.0;
   }
 
-  // Final frame: X=largest, Y=medium, Z=smallest  (or whatever your convention)
-  Eigen::Vector3d x_axis = sorted_axes[0];
-  Eigen::Vector3d y_axis = sorted_axes[1];
-  Eigen::Vector3d z_axis = sorted_axes[2];
-
-  // Ensure right-handed
-  if (x_axis.cross(y_axis).dot(z_axis) < 0)
-    z_axis = -z_axis;
+  Eigen::Vector3d fx = sorted_axes[2];
+  Eigen::Vector3d fy = sorted_axes[1];
+  Eigen::Vector3d fz = sorted_axes[0];
+  if (fx.cross(fy).dot(fz) < 0) fz = -fz;
 
   // ---------------------------
-  // 5. Bias centroid toward true box center
-  //
-  //  For each visible face: its outward normal points away from center.
-  //  The centroid is biased toward that face by half the box depth
-  //  in that direction → shift it back inward by (L/2 - observed offset).
-  //
-  //  More robustly: shift = -n * (L/2) for each visible face normal,
-  //  starting from the face centroid.
-  //  Box center ≈ face_centroid - n * (L/2)
-  //  Average over all visible faces.
+  // 5. Inlier-weighted center estimate (instead of plain average)
   // ---------------------------
   Eigen::Vector3d box_center = Eigen::Vector3d::Zero();
+  double weight_sum = 0.0;
 
   for (const auto& plane : planes) {
-    const Eigen::Vector3d& n = plane.normal;
-    const Eigen::Vector3d& fp = plane.mean_point;
-
-    // Find which axis this normal is closest to, get the right half-size
-    double best_dot = -1.0;
-    double half_L = 0.0;
+    double best_dot = -1.0, half_L = 0.0;
     for (int k = 0; k < 3; ++k) {
-      double d = std::abs(n.dot(sorted_axes[k]));
-      if (d > best_dot) {
-        best_dot = d;
-        half_L = half_sizes[k];
-      }
+      double d = std::abs(plane.normal.dot(sorted_axes[k]));
+      if (d > best_dot) { best_dot = d; half_L = half_sizes[k]; }
     }
-
-    // Center estimate from this face: move inward by half the box depth
-    box_center += fp - n * half_L;
+    double w = static_cast<double>(plane.inlier_count);
+    box_center += w * (plane.mean_point - plane.normal * half_L);
+    weight_sum += w;
   }
+  box_center /= weight_sum;
 
-  box_center /= (double)planes.size();
+  box_center(2) += table_d_;
 
   // ---------------------------
-  // 6. Build final pose
+  // 6. Final pose
   // ---------------------------
   Eigen::Matrix3d R;
-  R.col(0) = x_axis;
-  R.col(1) = y_axis;
-  R.col(2) = z_axis;
+  R.col(0) = fx;
+  R.col(1) = fy;
+  R.col(2) = fz;
 
   pose.linear() = R;
   pose.translation() = box_center;
@@ -735,7 +715,7 @@ void ObjectFinder::createBox(Eigen::Affine3d& pose, const std::vector<double>& d
   object.primitives.resize(1);
 
   object.primitives[0].type = shape_msgs::msg::SolidPrimitive::BOX;
-  object.primitives[0].dimensions = {dim[0], dim[1], dim[2]};
+  object.primitives[0].dimensions = {dim[2], dim[1], dim[0]};
 
   geometry_msgs::msg::Pose p;
   p.position.x = pose.translation().x();
@@ -801,10 +781,6 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   if (cluster_indices_.empty())
     return;
 
-  // _tab_score[cluster_idx][flat_object_idx] = match score of that cluster
-  // against that specific object *instance*.
-  // flat_object_idx runs over ALL instances of ALL objects, flattened:
-  //   object 0 instance 0, object 0 instance 1, ..., object 1 instance 0, ...
   std::vector<std::vector<double>> _tab_score;
   std::size_t cluster_num = 0;
 
@@ -909,24 +885,15 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       for (std::size_t n_cluster = 0; n_cluster < nb_cluster; n_cluster++)
         tmp_score.push_back(_tab_score.at(n_cluster).at(flat_offset + counter));
 
-      // FIX: search tmp_score (per-instance scores), not _tab_score
-      // (max_element on a vector<vector<double>> compares rows
-      // lexicographically, not by actual score — that was the bug).
       auto _it = std::max_element(tmp_score.begin(), tmp_score.end());
       int _index = static_cast<int>(std::distance(tmp_score.begin(), _it));
 
-      RCLCPP_WARN(LOGGER, "CLUSTER : %d", _index);
-
-      // Mark this cluster's score as "used" for all instances of this object,
-      // so it can't be picked again. FIX: use flat_offset, not n_object.
       for (std::size_t i = 0; i < number; i++)
         _tab_score.at(_index).at(flat_offset + i) = 0.0;
 
       object_cloud_->clear();
       for (const auto& idx : cluster_indices_[_index].indices)
         object_cloud_->points.push_back(cluster_cloud_->points[idx]);
-
-      RCLCPP_WARN(LOGGER, "SIZE : %ld", object_cloud_->points.size());
 
       if (!object_cloud_->points.empty())
         objects_[n_object].poses.push_back(centroidBias(object_cloud_, dim, type));
@@ -945,16 +912,18 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   cluster_indices_.clear();
 
   // ── Construction of collision objects ─────────────────────────────────
-  RCLCPP_INFO(LOGGER, "Creation");
   for (std::size_t n_object = 0; n_object < objects_.size(); n_object++) {
     auto type = objects_[n_object].shape;
     auto dim  = objects_[n_object].dimension;
 
     for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
-      auto pose = objects_[n_object].poses[counter];
-      RCLCPP_WARN(LOGGER, "POSITION : %f, %f, %f",
-                  pose.translation().x(), pose.translation().y(), pose.translation().z());
-      createObstacle(pose, dim, type, counter);
+      if (!objects_[n_object].created[counter])
+      {
+        auto pose = objects_[n_object].poses[counter];
+        Eigen::Quaterniond quat(pose.rotation());
+        createObstacle(pose, dim, type, counter);
+        objects_[n_object].created[counter] = true;
+      }
     }
   }
 }

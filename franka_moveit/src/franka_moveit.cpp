@@ -63,6 +63,8 @@ int main(int argc, char * argv[])
 
   auto plan_sub = node->create_subscription<std_msgs::msg::Empty>("start_planning", 10,
     [&move_group, robot_state, &plan, &moveit_visual_tools, &marker_pub, &plannerGroup](std_msgs::msg::Empty){ 
+      move_group.setStartStateToCurrentState();
+      
       bool pathFound = false;
       unsigned int iter = 0;
       do

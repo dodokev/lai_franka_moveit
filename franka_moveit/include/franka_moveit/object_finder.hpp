@@ -31,6 +31,7 @@ struct Object {
   
   unsigned int number;
   std::vector<Eigen::Affine3d> poses;
+  std::vector<bool> created;
 
   Object(Shape& s, std::vector<double>& v) : shape(s), dimension(v), number(1) {}
 };
