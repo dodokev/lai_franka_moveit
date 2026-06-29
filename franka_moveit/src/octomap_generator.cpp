@@ -19,7 +19,7 @@ OctomapGenerator::OctomapGenerator()
         std::bind(&OctomapGenerator::cloudCallback, this, std::placeholders::_1));
 
     timer_ = create_wall_timer(
-        std::chrono::milliseconds(10),
+        std::chrono::milliseconds(500),
         std::bind(&OctomapGenerator::updateOctomap, this));
 
     map_.clear();

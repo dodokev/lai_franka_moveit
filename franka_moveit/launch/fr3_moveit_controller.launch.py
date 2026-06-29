@@ -120,23 +120,6 @@ def generate_launch_description():
         .to_moveit_configs()
     )
 
-    # ompl_planning_pipeline_config = {
-    #     'move_group': {
-    #         'planning_plugin': 'ompl_interface/OMPLPlanner',
-    #         'request_adapters': 'default_planner_request_adapters/AddTimeOptimalParameterization '
-    #                             'default_planner_request_adapters/ResolveConstraintFrames '
-    #                             'default_planner_request_adapters/FixWorkspaceBounds '
-    #                             'default_planner_request_adapters/FixStartStateBounds '
-    #                             'default_planner_request_adapters/FixStartStateCollision '
-    #                             'default_planner_request_adapters/FixStartStatePathConstraints',
-    #         'start_state_max_bounds_error': 0.1,
-    #     }
-    # }
-    # ompl_planning_yaml = load_yaml(
-    #     'franka_moveit_config', 'config/ompl_planning.yaml'
-    # )
-    # ompl_planning_pipeline_config['move_group'].update(ompl_planning_yaml)
-
     octomap_yaml = load_yaml("franka_moveit_config", "config/octomap.yaml")
     cartesian_lim_yaml = load_yaml("franka_moveit_config", "config/pilz_cartesian_limits.yaml")
     move_group_capabilities = {"capabilities": "move_group/ExecuteTaskSolutionCapability"}
@@ -242,8 +225,9 @@ def generate_launch_description():
     )
 
     # Load controllers
+    # 'fr3_gripper_controller'
     load_controllers = []
-    for controller in ['fr3_arm_controller', 'fr3_gripper_controller', 'joint_state_broadcaster']:
+    for controller in ['fr3_arm_controller', 'joint_state_broadcaster']:
         load_controllers.append(
             ExecuteProcess(
                 cmd=[

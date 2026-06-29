@@ -42,7 +42,7 @@ class MTCTaskNode {
   void setupPlanningScene();
   bool setupPlanner();
   
-  void doTask();
+  bool doTask();
 
 private:
   // Compose an MTC task from a series of stages.
@@ -87,7 +87,7 @@ private:
   std::string hand_frame_;
 
   std::string stage_failed_{""};
-  unsigned int recovery_allowed_{2};
+  unsigned int recovery_allowed_{0};
   unsigned int recovery_done_{0};
 };
 
@@ -116,7 +116,7 @@ rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseIn
 
 void MTCTaskNode::setupPlanningScene() {
   moveit_msgs::msg::CollisionObject object;
-  object.id = "object";
+  object.id = "object0";
   object.header.frame_id = "world";
   object.primitives.resize(1);
 
@@ -146,7 +146,7 @@ void MTCTaskNode::setupPlanningScene() {
   object.primitive_poses.push_back(pose);
 
   moveit::planning_interface::PlanningSceneInterface psi;
-  psi.applyCollisionObject(object);
+  // psi.applyCollisionObject(object);
 }
 
 bool MTCTaskNode::setupPlanner() {
@@ -168,15 +168,15 @@ bool MTCTaskNode::setupPlanner() {
   pilz_planner->setPlannerId("PTP");
 
   multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
+  multipipeline_planner_->push_back(rrtconnect_planner);
   multipipeline_planner_->push_back(pilz_planner);
   multipipeline_planner_->push_back(rrtstar_planner);
-  multipipeline_planner_->push_back(rrtconnect_planner);
 
   interpolation_planner_ = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
 
   cartesian_planner_ = std::make_shared<mtc::solvers::CartesianPath>();
-  cartesian_planner_->setMaxVelocityScalingFactor(0.15);
-  cartesian_planner_->setMaxAccelerationScalingFactor(0.15);
+  cartesian_planner_->setMaxVelocityScalingFactor(0.05);
+  cartesian_planner_->setMaxAccelerationScalingFactor(0.05);
   cartesian_planner_->setStepSize(.005);
 
   return true;
@@ -639,7 +639,7 @@ bool MTCTaskNode::executeTask()
   return true;
 }
 
-void MTCTaskNode::doTask() {
+bool MTCTaskNode::doTask() {
   task_.clear();
 
   fillTask();
@@ -648,12 +648,12 @@ void MTCTaskNode::doTask() {
     task_.init();
   } catch (mtc::InitStageException& e) {
     RCLCPP_ERROR_STREAM(LOGGER, e);
-    return;
+    return false;
   }
 
   if (!task_.plan(1)) {
     RCLCPP_ERROR_STREAM(LOGGER, "Task planning failed");
-    return;
+    return false;
   }
 
   if(!executeTask())
@@ -662,17 +662,17 @@ void MTCTaskNode::doTask() {
     {
       ++recovery_done_;
       RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);
-      return doTask();
+      return true;
     }
     else
     {
       RCLCPP_ERROR(LOGGER, "No more recovery possible");
-      return;
+      return false;
     }
   }
 
   RCLCPP_INFO(LOGGER, "Execution done");
-  return;
+  return false;
 }
 
 int main(int argc, char** argv) {
@@ -692,9 +692,14 @@ int main(int argc, char** argv) {
 
   mtc_task_node->setupPlanner();
   mtc_task_node->setupPlanningScene();
-  mtc_task_node->doTask();
+  bool value{true};
+  do{
+    value = mtc_task_node->doTask();
+  } while(value);
 
-  spin_thread->join();
+  RCLCPP_INFO(LOGGER, "STOP");
   rclcpp::shutdown();
+  spin_thread->join();
+  RCLCPP_INFO(LOGGER, "STOP SPIN");
   return 0;
 }

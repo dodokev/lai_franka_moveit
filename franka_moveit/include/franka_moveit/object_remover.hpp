@@ -10,13 +10,16 @@
 #include <pcl_conversions/pcl_conversions.h>
 
 #include <pcl/filters/crop_box.h>
+#include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 
 class ObjectRemover : public rclcpp::Node {
- public:
+public:
   ObjectRemover(moveit::planning_interface::PlanningSceneInterface* ps);
   ~ObjectRemover() = default;
 
- private:
+  void init();
+
+private:
   /* data */
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_unfilter_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_filtered_;
@@ -26,4 +29,8 @@ class ObjectRemover : public rclcpp::Node {
   void callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud);  
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr remover(pcl::PointCloud<pcl::PointXYZ>::Ptr current, moveit_msgs::msg::CollisionObject& obj_msg, const std::string& parent="");
+
+  moveit::core::RobotModelPtr robot_model_;
+  moveit::core::RobotStatePtr robot_state_;
+  planning_scene_monitor::PlanningSceneMonitorPtr planning_scene_monitor_;
 };
