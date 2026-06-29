@@ -561,21 +561,23 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   // 2. PCA → reliable axis direction seed
   //    For a horizontal cylinder, col(0) is always the height axis.
   // ---------------------------
-  pcl::PCA<pcl::PointXYZ> pca;
-  pca.setInputCloud(obj_cloud);
-  Eigen::Vector3d z_axis = pca.getEigenVectors().col(0).cast<double>().normalized();
+  // pcl::PCA<pcl::PointXYZ> pca;
+  // pca.setInputCloud(obj_cloud);
+  // Eigen::Vector3d z_axis = pca.getEigenVectors().col(0).cast<double>().normalized();
+
+  Eigen::Vector3d z_axis = table_normal_.normalized();
 
   // Pin: make dominant component always positive → no random 180° flips
-  int dominant = 0;
-  z_axis.cwiseAbs().maxCoeff(&dominant);
-  if (z_axis[dominant] < 0)
-    z_axis = -z_axis;
+  // int dominant = 0;
+  // z_axis.cwiseAbs().maxCoeff(&dominant);
+  // if (z_axis[dominant] < 0)
+  //   z_axis = -z_axis;
 
-  RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-               "centroidBiasCylinder: cloud=%zu  h=%.3f r=%.3f", obj_cloud->size(), known_height,
-               known_radius);
-  RCLCPP_DEBUG(rclcpp::get_logger("object_finder"), "centroidBiasCylinder: z_axis=[%.3f %.3f %.3f]",
-               z_axis.x(), z_axis.y(), z_axis.z());
+  // RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
+  //              "centroidBiasCylinder: cloud=%zu  h=%.3f r=%.3f", obj_cloud->size(), known_height,
+  //              known_radius);
+  // RCLCPP_DEBUG(rclcpp::get_logger("object_finder"), "cWentroidBiasCylinder: z_axis=[%.3f %.3f %.3f]",
+  //              z_axis.x(), z_axis.y(), z_axis.z());
 
   // ---------------------------
   // 3. Find true axis center radially
@@ -602,6 +604,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     ref = Eigen::Vector3d::UnitZ();
 
   Eigen::Vector3d x_axis = (ref - ref.dot(z_axis) * z_axis).normalized();
+  // Eigen::Vector3d x_axis = Eigen::Vector3d::UnitX();
   Eigen::Vector3d y_axis = z_axis.cross(x_axis).normalized();
 
   // Project all points into 2D (u, v) plane centered at raw centroid
@@ -623,24 +626,62 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     A(i, 2) = -1.0;
     b(i) = u * u + v * v;
   }
-
+  
   // Solve least squares: x = [cu, cv, d]
   Eigen::Vector3d x = A.colPivHouseholderQr().solve(b);
   double cu = x(0);  // circle center in 2D (relative to raw centroid)
   double cv = x(1);
 
+  Eigen::Vector2d center(cu, cv);
+
+  for (int iter = 0; iter < 10; ++iter)
+  {
+      Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
+      Eigen::Vector2d g = Eigen::Vector2d::Zero();
+
+      for (const auto& pt : *obj_cloud)
+      {
+          Eigen::Vector3d p3(pt.x, pt.y, pt.z);
+
+          Eigen::Vector3d dp = p3 - centroid;
+
+          Eigen::Vector2d p(
+              dp.dot(x_axis),
+              dp.dot(y_axis));
+
+          Eigen::Vector2d d = center - p;
+
+          double dist = d.norm();
+
+          if (dist < 1e-6)
+              continue;
+
+          double r = dist - known_radius;
+
+          Eigen::Vector2d J = d / dist;
+
+          H += J * J.transpose();
+          g += J * r;
+      }
+
+      center -= H.ldlt().solve(g);
+  }
+
+  cu = center.x();
+  cv = center.y();
+
   // Back to 3D: axis_center = centroid + cu*ex + cv*ey
   Eigen::Vector3d axis_center = centroid + cu * x_axis + cv * y_axis;
+ 
+  // RCLCPP_INFO(LOGGER,
+  //   "centroid = %.3f %.3f %.3f",
+  //   centroid.x(), centroid.y(), centroid.z());
 
-  // Sanity check: fitted radius should match known_radius
-  double fitted_radius = std::sqrt(x(2) + known_radius * known_radius);
-  RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-               "centroidBiasCylinder: fitted_radius=%.4f  known_radius=%.4f  error=%.4f",
-               fitted_radius, known_radius, std::abs(fitted_radius - known_radius));
-  RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-               "centroidBiasCylinder: radial correction=[%.4f %.4f %.4f]",
-               (axis_center - centroid).x(), (axis_center - centroid).y(),
-               (axis_center - centroid).z());
+  // RCLCPP_INFO(LOGGER,
+  //     "correction = %.3f %.3f %.3f",
+  //     (cu*x_axis + cv*y_axis).x(),
+  //     (cu*x_axis + cv*y_axis).y(),
+  //     (cu*x_axis + cv*y_axis).z());
 
   // ---------------------------
   // 4. Bias along Z (axial correction) — relative to axis_center now
@@ -674,6 +715,8 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     }
   }
 
+  // Just because
+  bias -= 0.01;
   Eigen::Vector3d true_center = axis_center + bias * z_axis;
 
   RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),

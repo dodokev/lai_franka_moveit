@@ -87,8 +87,10 @@ private:
   std::string hand_frame_;
 
   std::string stage_failed_{""};
-  unsigned int recovery_allowed_{0};
+  unsigned int recovery_allowed_{2};
   unsigned int recovery_done_{0};
+
+  std::string object_name_;
 };
 
 MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
@@ -146,7 +148,7 @@ void MTCTaskNode::setupPlanningScene() {
   object.primitive_poses.push_back(pose);
 
   moveit::planning_interface::PlanningSceneInterface psi;
-  // psi.applyCollisionObject(object);
+  psi.applyCollisionObject(object);
 }
 
 bool MTCTaskNode::setupPlanner() {
@@ -320,7 +322,7 @@ void MTCTaskNode::createPickTask() {
       stage->properties().configureInitFrom(mtc::Stage::PARENT);
       stage->properties().set("marker_ns", "grasp");
       stage->setPreGraspPose("open");
-      stage->setObject("object");
+      stage->setObject("object0");
       if (type_ == SHAPE::BOX)
         stage->setAngleDelta(M_PI / 2);
       else if (type_ == SHAPE::CYLINDER)
@@ -368,7 +370,7 @@ void MTCTaskNode::createPickTask() {
       stage->properties().configureInitFrom(mtc::Stage::PARENT);
       stage->properties().set("marker_ns", "grasp");
       stage->setPreGraspPose("open");
-      stage->setObject("object");
+      stage->setObject("object0");
       if (type_ == SHAPE::BOX)
         stage->setAngleDelta(M_PI / 2);
       else if (type_ == SHAPE::CYLINDER)
@@ -421,7 +423,7 @@ void MTCTaskNode::createPickTask() {
     {
       auto stage =
           std::make_unique<mtc::stages::ModifyPlanningScene>("allowCollision");
-      stage->allowCollisions("object",
+      stage->allowCollisions("object0",
                              task_.getRobotModel()
                                  ->getJointModelGroup(hand_group_name_)
                                  ->getLinkModelNamesWithCollisionGeometry(),
@@ -438,7 +440,7 @@ void MTCTaskNode::createPickTask() {
 
     {
       auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
-      stage->attachObject("object", hand_frame_);
+      stage->attachObject("object0", hand_frame_);
       pick_stage_ptr_ = stage.get();
       container->insert(std::move(stage));
     }
@@ -511,7 +513,7 @@ void MTCTaskNode::createPlaceTask() {
       auto stage = std::make_unique<mtc::stages::GeneratePlacePose>("generatePose");
       stage->properties().configureInitFrom(mtc::Stage::PARENT);
       stage->properties().set("marker_ns", "pose");
-      stage->setObject("object");
+      stage->setObject("object0");
 
       geometry_msgs::msg::PoseStamped target_pose_msg;
       target_pose_msg.header.frame_id = "world";
@@ -525,7 +527,7 @@ void MTCTaskNode::createPlaceTask() {
       auto wrapper = std::make_unique<mtc::stages::ComputeIK>("poseIK", std::move(stage));
       wrapper->setMaxIKSolutions(2);
       wrapper->setMinSolutionDistance(1.0);
-      wrapper->setIKFrame("object");
+      wrapper->setIKFrame("object0");
       wrapper->properties().configureInitFrom(mtc::Stage::PARENT, {"eef", "group"});
       wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, {"target_pose"});
       container->insert(std::move(wrapper));
@@ -548,7 +550,7 @@ void MTCTaskNode::createPlaceTask() {
 
     {
       auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("forbidCollision");
-      stage->allowCollisions("object",
+      stage->allowCollisions("object0",
                              task_.getRobotModel()
                                  ->getJointModelGroup(hand_group_name_)
                                  ->getLinkModelNamesWithCollisionGeometry(),
@@ -558,7 +560,7 @@ void MTCTaskNode::createPlaceTask() {
 
     {
       auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("detachObject");
-      stage->detachObject("object", hand_frame_);
+      stage->detachObject("object0", hand_frame_);
       container->insert(std::move(stage));
     }
 
@@ -640,10 +642,13 @@ bool MTCTaskNode::executeTask()
 }
 
 bool MTCTaskNode::doTask() {
+  mtc::Task baby;
   task_.clear();
 
+  RCLCPP_WARN(LOGGER, "FIlling");
   fillTask();
 
+  RCLCPP_WARN(LOGGER, "Init");
   try {
     task_.init();
   } catch (mtc::InitStageException& e) {
@@ -651,11 +656,13 @@ bool MTCTaskNode::doTask() {
     return false;
   }
 
+  RCLCPP_WARN(LOGGER, "Plan");
   if (!task_.plan(1)) {
     RCLCPP_ERROR_STREAM(LOGGER, "Task planning failed");
     return false;
   }
 
+  RCLCPP_WARN(LOGGER, "Execute");
   if(!executeTask())
   {
     if (recovery_done_ < recovery_allowed_)
@@ -694,6 +701,7 @@ int main(int argc, char** argv) {
   mtc_task_node->setupPlanningScene();
   bool value{true};
   do{
+    RCLCPP_WARN(LOGGER, "doTask");
     value = mtc_task_node->doTask();
   } while(value);
 
