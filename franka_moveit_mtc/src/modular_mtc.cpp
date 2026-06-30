@@ -28,11 +28,6 @@
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 namespace mtc = moveit::task_constructor;
 
-// #include <moveit_task_constructor_msgs/msg/solution_info.hpp>
-// #include <moveit_task_constructor_msgs/action/execute_task_solution.hpp>
-
-using ExecuteTaskSolutionAction = moveit_task_constructor_msgs::action::ExecuteTaskSolution;
-
 class MTCTaskNode {
  public:
   enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
@@ -53,9 +48,11 @@ private:
   bool executeTask();
 
   void addCurrentStage();
+  void addAttachStage(std::string object_name);
+  void addLiftStage(double min, double max);
 
   mtc::Stage* current_state_ptr_{nullptr};
-  mtc::Stage* pick_stage_ptr_{nullptr};
+  mtc::Stage* attach_stage_ptr_{nullptr};
 
   // Predicate used by Connect/PredicateFilter stages to reject solutions that
   // get too close to obstacles or violate joint bounds.
@@ -152,6 +149,12 @@ void MTCTaskNode::setupPlanningScene() {
 }
 
 bool MTCTaskNode::setupPlanner() {
+  auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
+  task_planner->setMaxVelocityScalingFactor(0.1);
+  task_planner->setMaxAccelerationScalingFactor(0.1);
+  task_planner->setTimeout(10.0);
+  task_planner->setPlannerId("RRTstarkConfigDefault");
+
   auto rrtstar_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
   rrtstar_planner->setMaxVelocityScalingFactor(0.1);
   rrtstar_planner->setMaxAccelerationScalingFactor(0.1);
@@ -163,16 +166,10 @@ bool MTCTaskNode::setupPlanner() {
   rrtconnect_planner->setMaxAccelerationScalingFactor(0.1);
   rrtconnect_planner->setPlannerId("RRTConnectkConfigDefault");
 
-  auto pilz_planner =
-      std::make_shared<mtc::solvers::PipelinePlanner>(node_, "pilz_industrial_motion_planner");
-  pilz_planner->setMaxVelocityScalingFactor(0.1);
-  pilz_planner->setMaxAccelerationScalingFactor(0.1);
-  pilz_planner->setPlannerId("PTP");
-
   multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
-  multipipeline_planner_->push_back(rrtconnect_planner);
-  multipipeline_planner_->push_back(pilz_planner);
+  multipipeline_planner_->push_back(task_planner);
   multipipeline_planner_->push_back(rrtstar_planner);
+  multipipeline_planner_->push_back(rrtconnect_planner);
 
   interpolation_planner_ = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
 
@@ -250,11 +247,9 @@ void MTCTaskNode::addCurrentStage() {
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
 
-  {
-    auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
-    current_state_ptr_ = stage_state_current.get();
-    task_.add(std::move(stage_state_current));
-  }
+  auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
+  current_state_ptr_ = stage_state_current.get();
+  task_.add(std::move(stage_state_current));
 }
 
 void MTCTaskNode::createPickTask() {
@@ -441,25 +436,11 @@ void MTCTaskNode::createPickTask() {
     {
       auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
       stage->attachObject("object0", hand_frame_);
-      pick_stage_ptr_ = stage.get();
+      attach_stage_ptr_ = stage.get();
       container->insert(std::move(stage));
     }
 
     serial->insert(std::move(container));
-  }
-
-  {
-    auto stage = std::make_unique<mtc::stages::MoveRelative>("lift", cartesian_planner_);
-    stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-    stage->setMinMaxDistance(0.05, 0.15);
-    stage->setIKFrame(hand_frame_);
-    stage->properties().set("marker_ns", "lift");
-
-    geometry_msgs::msg::Vector3Stamped vec;
-    vec.header.frame_id = "world";
-    vec.vector.z = 1.0;
-    stage->setDirection(vec);
-    serial->insert(std::move(stage));
   }
 
   task_.add(std::move(serial));
@@ -522,7 +503,7 @@ void MTCTaskNode::createPlaceTask() {
       target_pose_msg.pose.position.z = z_/2 + margin_;
       target_pose_msg.pose.orientation.w = 1.0;
       stage->setPose(target_pose_msg);
-      stage->setMonitoredStage(pick_stage_ptr_);
+      stage->setMonitoredStage(attach_stage_ptr_);
 
       auto wrapper = std::make_unique<mtc::stages::ComputeIK>("poseIK", std::move(stage));
       wrapper->setMaxIKSolutions(2);
@@ -598,14 +579,59 @@ void MTCTaskNode::createPlaceTask() {
   task_.add(std::move(serial));
 }
 
+void MTCTaskNode::addLiftStage(double min, double max)
+{
+  task_.setRobotModel(model_);
+
+  task_.setProperty("group", arm_group_name_);
+  task_.setProperty("eef", hand_group_name_);
+  task_.setProperty("ik_frame", hand_frame_);
+
+  auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
+  stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+  stage->setMinMaxDistance(min, max);
+  stage->setIKFrame(hand_frame_);
+  stage->properties().set("marker_ns", "lift");
+
+  geometry_msgs::msg::Vector3Stamped vec;
+  vec.header.frame_id = "world";
+  vec.vector.z = 1.0;
+  stage->setDirection(vec);
+  task_.add(std::move(stage));
+}
+
+void MTCTaskNode::addAttachStage(std::string object_name)
+{
+  task_.setRobotModel(model_);
+
+  task_.setProperty("group", arm_group_name_);
+  task_.setProperty("eef", hand_group_name_);
+  task_.setProperty("ik_frame", hand_frame_);
+
+  {
+    auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
+    stage->attachObject(object_name, hand_frame_);
+    attach_stage_ptr_ = stage.get();
+    task_.add(std::move(stage));
+  }
+}
+
 void MTCTaskNode::fillTask()
 {
   addCurrentStage();
   if (stage_failed_ == "PickTask" || stage_failed_ == "") {
     createPickTask();
+    addLiftStage(0.05, 0.15);
+    createPlaceTask();
+  }
+  else if (stage_failed_ == "liftObject")
+  {
+    addAttachStage("object0");
+    addLiftStage(0.05, 0.15);
     createPlaceTask();
   }
   else if (stage_failed_ == "PlaceTask") {
+    addAttachStage("object0");
     createPlaceTask();
   }
 }
@@ -642,8 +668,8 @@ bool MTCTaskNode::executeTask()
 }
 
 bool MTCTaskNode::doTask() {
-  mtc::Task baby;
-  task_.clear();
+  task_ = mtc::Task();
+  // task_.clear();
 
   RCLCPP_WARN(LOGGER, "FIlling");
   fillTask();
@@ -661,6 +687,8 @@ bool MTCTaskNode::doTask() {
     RCLCPP_ERROR_STREAM(LOGGER, "Task planning failed");
     return false;
   }
+  
+  task_.introspection().publishSolution(*task_.solutions().front());
 
   RCLCPP_WARN(LOGGER, "Execute");
   if(!executeTask())
@@ -701,13 +729,11 @@ int main(int argc, char** argv) {
   mtc_task_node->setupPlanningScene();
   bool value{true};
   do{
-    RCLCPP_WARN(LOGGER, "doTask");
     value = mtc_task_node->doTask();
   } while(value);
 
   RCLCPP_INFO(LOGGER, "STOP");
-  rclcpp::shutdown();
   spin_thread->join();
-  RCLCPP_INFO(LOGGER, "STOP SPIN");
+  rclcpp::shutdown();
   return 0;
 }
