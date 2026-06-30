@@ -23,6 +23,8 @@
 
 #include <visualization_msgs/msg/marker.hpp>
 
+#include "franka_moveit_msg/srv/enable_create.hpp"
+
 enum Shape { NONE, SPHERE, CYLINDER, BOX };
 
 struct Object {
@@ -43,6 +45,13 @@ class ObjectFinder : public rclcpp::Node {
   ~ObjectFinder() = default;
 
  private:
+  bool enable_create{true};
+
+  rclcpp::Service<franka_moveit_msg::srv::EnableCreate>::SharedPtr service_;
+  void handle_service(
+        const std::shared_ptr<franka_moveit_msg::srv::EnableCreate::Request> request,
+        std::shared_ptr<franka_moveit_msg::srv::EnableCreate::Response> response);
+  
   /* data */
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_unfilter_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_size_;

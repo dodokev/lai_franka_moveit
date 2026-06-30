@@ -12,6 +12,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetTrajectory.srv"
+  "srv/EnableCreate.srv"
   DEPENDENCIES moveit_core # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )
 

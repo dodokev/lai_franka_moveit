@@ -24,6 +24,7 @@
 #include <moveit/task_constructor/solvers/multi_planner.h>
 
 #include <functional>
+#include "franka_moveit_msg/srv/enable_create.hpp"
 
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 namespace mtc = moveit::task_constructor;
@@ -42,7 +43,7 @@ class MTCTaskNode {
 private:
   // Compose an MTC task from a series of stages.
   void createPickTask();
-  void createPlaceTask();
+  void createPlaceTask(mtc::Stage* monitored);
 
   void fillTask();
   bool executeTask();
@@ -145,15 +146,14 @@ void MTCTaskNode::setupPlanningScene() {
   object.primitive_poses.push_back(pose);
 
   moveit::planning_interface::PlanningSceneInterface psi;
-  psi.applyCollisionObject(object);
+  // psi.applyCollisionObject(object);
 }
 
 bool MTCTaskNode::setupPlanner() {
-  auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
-  task_planner->setMaxVelocityScalingFactor(0.1);
-  task_planner->setMaxAccelerationScalingFactor(0.1);
-  task_planner->setTimeout(10.0);
-  task_planner->setPlannerId("RRTstarkConfigDefault");
+  // auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
+  // task_planner->setMaxVelocityScalingFactor(0.1);
+  // task_planner->setMaxAccelerationScalingFactor(0.1);
+  // task_planner->setTimeout(10.0);
 
   auto rrtstar_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
   rrtstar_planner->setMaxVelocityScalingFactor(0.1);
@@ -166,8 +166,14 @@ bool MTCTaskNode::setupPlanner() {
   rrtconnect_planner->setMaxAccelerationScalingFactor(0.1);
   rrtconnect_planner->setPlannerId("RRTConnectkConfigDefault");
 
+  auto lin_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "pilz_industrial_motion_planner");
+  lin_planner->setMaxVelocityScalingFactor(0.1);
+  lin_planner->setMaxAccelerationScalingFactor(0.1);
+  lin_planner->setPlannerId("LIN");
+
   multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
-  multipipeline_planner_->push_back(task_planner);
+  // multipipeline_planner_->push_back(task_planner);
+  // multipipeline_planner_->push_back(lin_planner);
   multipipeline_planner_->push_back(rrtstar_planner);
   multipipeline_planner_->push_back(rrtconnect_planner);
 
@@ -446,7 +452,7 @@ void MTCTaskNode::createPickTask() {
   task_.add(std::move(serial));
 }
 
-void MTCTaskNode::createPlaceTask() {
+void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
   task_.setRobotModel(model_);
 
   task_.setProperty("group", arm_group_name_);
@@ -503,7 +509,7 @@ void MTCTaskNode::createPlaceTask() {
       target_pose_msg.pose.position.z = z_/2 + margin_;
       target_pose_msg.pose.orientation.w = 1.0;
       stage->setPose(target_pose_msg);
-      stage->setMonitoredStage(attach_stage_ptr_);
+      stage->setMonitoredStage(monitored);
 
       auto wrapper = std::make_unique<mtc::stages::ComputeIK>("poseIK", std::move(stage));
       wrapper->setMaxIKSolutions(2);
@@ -622,17 +628,17 @@ void MTCTaskNode::fillTask()
   if (stage_failed_ == "PickTask" || stage_failed_ == "") {
     createPickTask();
     addLiftStage(0.05, 0.15);
-    createPlaceTask();
+    createPlaceTask(attach_stage_ptr_);
   }
   else if (stage_failed_ == "liftObject")
   {
-    addAttachStage("object0");
+    // addAttachStage("object0");
     addLiftStage(0.05, 0.15);
-    createPlaceTask();
+    createPlaceTask(current_state_ptr_);
   }
   else if (stage_failed_ == "PlaceTask") {
-    addAttachStage("object0");
-    createPlaceTask();
+    // addAttachStage("object0");
+    createPlaceTask(current_state_ptr_);
   }
 }
 
@@ -655,13 +661,47 @@ bool MTCTaskNode::executeTask()
     stage_failed_ = c->name();
     RCLCPP_WARN(LOGGER, "Stage executing : %s", stage_failed_.c_str());
 
-    auto result = task_.execute(*s);
-    if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
-    { 
-      RCLCPP_WARN(LOGGER, "Stage failed : %s", stage_failed_.c_str());
-      RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
-      return false;
-    }
+    if (stage_failed_ == "liftObject")
+    {
+      // ==================================================================================================
+      // -- SERVICE TO SEND CARTESIAN TRAJECTORY TO CUSTOM CONTROLLER --
+      rclcpp::Client<franka_moveit_msg::srv::EnableCreate>::SharedPtr client =
+          node_->create_client<franka_moveit_msg::srv::EnableCreate>("enable_create");
+      
+      auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
+      request->enable = true;
+      
+      using namespace std::chrono_literals;
+      while (!client->wait_for_service(1s)) {
+          if (!rclcpp::ok()) {
+          RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
+          return 0;
+          }
+          RCLCPP_INFO(LOGGER, "service not available, waiting again...");
+      }
+      
+      auto result = client->async_send_request(request);
+      // Wait for the result.
+      while (rclcpp::ok())
+      {
+          auto status = result.wait_for(std::chrono::milliseconds(100));
+          if (status == std::future_status::ready)
+          {
+            auto response = result.get();
+            RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
+            RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
+            break;
+          }
+      }
+      // ==================================================================================================
+    } 
+    // auto result = task_.execute(*s);
+    // if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
+    // { 
+    //   RCLCPP_WARN(LOGGER, "Stage failed : %s", stage_failed_.c_str());
+    //   RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
+    //   return false;
+    // }
   }
 
   return true;

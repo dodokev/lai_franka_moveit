@@ -26,7 +26,7 @@ def generate_launch_description():
 
     franka_node = Node(
         package="franka_moveit",
-        executable="simple_mvt",
+        executable="simple_movement",
         output="screen",
         parameters=[
             moveit_config.to_dict(),

@@ -125,6 +125,7 @@ ament_target_dependencies(
   "rclcpp"
   "moveit_ros_planning_interface"
   pcl_ros
+  franka_moveit_msg
 )
 ament_target_dependencies(
   object_remover

@@ -7,6 +7,15 @@ static auto const LOGGER = rclcpp::get_logger("object_finder");
 
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
     : Node("object_finder"), planning_scene_(ps) {
+
+
+  service_ = this->create_service<franka_moveit_msg::srv::EnableCreate>(
+        "enable_create",
+        std::bind(&ObjectFinder::handle_service, this,
+                std::placeholders::_1,
+                std::placeholders::_2)
+    );
+  
   sub_unfilter_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
       "/points_used", rclcpp::SensorDataQoS(),
       std::bind(&ObjectFinder::filter_callback, this, std::placeholders::_1));
@@ -24,6 +33,20 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
   cluster_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   object_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
+}
+
+void ObjectFinder::handle_service(
+    const std::shared_ptr<franka_moveit_msg::srv::EnableCreate::Request> request,
+    std::shared_ptr<franka_moveit_msg::srv::EnableCreate::Response> response)
+{
+  RCLCPP_INFO(LOGGER, "Enable Create Called ...");
+  
+  RCLCPP_WARN(LOGGER, "Asking %s", request->enable ? "True" : "False");
+
+  enable_create = request->enable;
+
+  response->current = enable_create;
+  response->success = true;
 }
 
 void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
@@ -960,12 +983,12 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     auto dim  = objects_[n_object].dimension;
 
     for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
-      if (!objects_[n_object].created[counter])
+      if (!objects_[n_object].created[counter] && enable_create)
       {
         auto pose = objects_[n_object].poses[counter];
         Eigen::Quaterniond quat(pose.rotation());
         createObstacle(pose, dim, type, counter);
-        objects_[n_object].created[counter] = true;
+        // objects_[n_object].created[counter] = true;
       }
     }
   }

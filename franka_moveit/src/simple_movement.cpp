@@ -100,33 +100,33 @@ int main(int argc, char *argv[])
     
     // ==================================================================================================
     // -- SERVICE TO SEND CARTESIAN TRAJECTORY TO CUSTOM CONTROLLER --
-    // rclcpp::Client<franka_moveit_msg::srv::SetTrajectory>::SharedPtr client =
-    //     node->create_client<franka_moveit_msg::srv::SetTrajectory>("robot_traj");
+    rclcpp::Client<franka_moveit_msg::srv::SetTrajectory>::SharedPtr client =
+        node->create_client<franka_moveit_msg::srv::SetTrajectory>("robot_traj");
     
-    // auto request = std::make_shared<franka_moveit_msg::srv::SetTrajectory::Request>();
-    // request->trajectory = plan.trajectory_;
+    auto request = std::make_shared<franka_moveit_msg::srv::SetTrajectory::Request>();
+    request->trajectory = plan.trajectory_;
     
-    // using namespace std::chrono_literals;
-    // while (!client->wait_for_service(1s)) {
-    //     if (!rclcpp::ok()) {
-    //     RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
-    //     return 0;
-    //     }
-    //     RCLCPP_INFO(LOGGER, "service not available, waiting again...");
-    // }
+    using namespace std::chrono_literals;
+    while (!client->wait_for_service(1s)) {
+        if (!rclcpp::ok()) {
+        RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
+        return 0;
+        }
+        RCLCPP_INFO(LOGGER, "service not available, waiting again...");
+    }
     
-    // auto result = client->async_send_request(request);
-    // // Wait for the result.
-    // while (rclcpp::ok())
-    // {
-    //     auto status = result.wait_for(std::chrono::milliseconds(100));
-    //     if (status == std::future_status::ready)
-    //     {
-    //         auto response = result.get();
-    //         RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
-    //         break;
-    //     }
-    // }
+    auto result = client->async_send_request(request);
+    // Wait for the result.
+    while (rclcpp::ok())
+    {
+        auto status = result.wait_for(std::chrono::milliseconds(100));
+        if (status == std::future_status::ready)
+        {
+            auto response = result.get();
+            RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
+            break;
+        }
+    }
     // ==================================================================================================
     
     // moveit_visual_tools.prompt("Press next to execute the trajectory");
