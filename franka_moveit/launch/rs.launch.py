@@ -199,9 +199,27 @@ def generate_launch_description():
         emulate_tty=True
     )
 
+    finder_node = Node(
+        package="franka_moveit",
+        executable="object_finder",
+        name="object_finder",
+        output="log",
+        emulate_tty=True
+    )
+
+    remover_node = Node(
+        package="franka_moveit",
+        executable="object_remover",
+        name="object_remover",
+        output="log",
+        emulate_tty=True
+    )
+
     return LaunchDescription(declare_configurable_parameters(configurable_parameters) + [
         april,
         april_frame,
         OpaqueFunction(function=launch_setup, kwargs = {'params' : set_configurable_parameters(configurable_parameters)}),
         outlier_node,
+        finder_node,
+        remover_node,
     ])

@@ -52,6 +52,8 @@ class ObjectFinder : public rclcpp::Node {
         const std::shared_ptr<franka_moveit_msg::srv::EnableCreate::Request> request,
         std::shared_ptr<franka_moveit_msg::srv::EnableCreate::Response> response);
   
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_centroid_;
+  
   /* data */
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_unfilter_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_size_;

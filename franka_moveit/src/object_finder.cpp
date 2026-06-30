@@ -8,7 +8,8 @@ static auto const LOGGER = rclcpp::get_logger("object_finder");
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
     : Node("object_finder"), planning_scene_(ps) {
 
-
+  pub_centroid_ = this->create_publisher<visualization_msgs::msg::Marker>("/centroid", 10);
+  
   service_ = this->create_service<franka_moveit_msg::srv::EnableCreate>(
         "enable_create",
         std::bind(&ObjectFinder::handle_service, this,
@@ -88,24 +89,13 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-void ObjectFinder::retreiveObject() {
-
-  pcl::PassThrough<pcl::PointXYZ> pass;
-  pass.setFilterFieldName("x");
-  pass.setFilterLimits(-0.25, 0.5); // TUNE (-0.25, 1.0)
-
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cropped(new pcl::PointCloud<pcl::PointXYZ>);
-  pass.setInputCloud(cloud_);
-  pass.filter(*cropped);
-
-  
+void ObjectFinder::retreiveObject() {  
   pcl::SACSegmentation<pcl::PointXYZ> _seg;
   _seg.setOptimizeCoefficients(true);
   _seg.setModelType(pcl::SACMODEL_PLANE);
   _seg.setMethodType(pcl::SAC_RANSAC);
   _seg.setDistanceThreshold(0.02);
-  // _seg.setInputCloud(cloud_);
-  _seg.setInputCloud(cropped);
+  _seg.setInputCloud(cloud_);
 
   // Eigen::Vector3f z(0, 0, 1);
   // _seg.setAxis(z);
@@ -116,8 +106,7 @@ void ObjectFinder::retreiveObject() {
   _seg.segment(*_inliers, *_coefficients);
 
   pcl::ExtractIndices<pcl::PointXYZ> _extract;
-  // _extract.setInputCloud(cloud_);
-  _extract.setInputCloud(cropped);
+  _extract.setInputCloud(cloud_);
   _extract.setIndices(_inliers);
   
   _extract.setNegative(false);
@@ -129,8 +118,8 @@ void ObjectFinder::retreiveObject() {
    */
   table_normal_ = Eigen::Vector3d(_coefficients->values[0], _coefficients->values[1], _coefficients->values[2]).normalized();
   if (table_normal_.z() < 0) table_normal_ = -table_normal_; // point "up"
-    // table_d_ = _coefficients->values[3];
-    table_d_ = 0.0;
+    table_d_ = _coefficients->values[3];
+    // table_d_ = 0.0;
 
   _extract.setNegative(true);
   _extract.filter(*cluster_cloud_);
@@ -580,6 +569,36 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   pcl::compute3DCentroid(*obj_cloud, centroid4);
   Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
 
+  visualization_msgs::msg::Marker _marker;
+  _marker.header.frame_id = "world";
+  _marker.header.stamp = rclcpp::Clock().now();
+
+  _marker.ns = "centroid";
+  _marker.id = 0;
+  _marker.type = visualization_msgs::msg::Marker::SPHERE;
+  _marker.action = visualization_msgs::msg::Marker::ADD;
+
+  // Position = your centroid
+  _marker.pose.position.x = centroid(0);
+  _marker.pose.position.y = centroid(1);
+  _marker.pose.position.z = centroid(2);
+
+  // No rotation needed
+  _marker.pose.orientation.w = 1.0;
+
+  // Size of the sphere
+  _marker.scale.x = 0.02;
+  _marker.scale.y = 0.02;
+  _marker.scale.z = 0.02;
+
+  // Color (red here)
+  _marker.color.r = 1.0;
+  _marker.color.g = 0.0;
+  _marker.color.b = 0.0;
+  _marker.color.a = 1.0;
+
+  pub_centroid_->publish(_marker);
+
   // ---------------------------
   // 2. PCA → reliable axis direction seed
   //    For a horizontal cylinder, col(0) is always the height axis.
@@ -694,7 +713,13 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   cv = center.y();
 
   // Back to 3D: axis_center = centroid + cu*ex + cv*ey
-  Eigen::Vector3d axis_center = centroid + cu * x_axis + cv * y_axis;
+  Eigen::Vector3d correction = cu * x_axis + cv * y_axis;
+  // Eigen::Vector3d axis_center = centroid + cu * x_axis + cv * y_axis;
+  /**
+   * TRY SOMETHING TO COMPUTE, ALPHA IN RESPECT TO MIN DISTANCE POINT CLOUD AND KNOWN RADIUS
+   */
+  double alpha = 0.45;
+  Eigen::Vector3d axis_center = centroid + alpha * correction;
  
   // RCLCPP_INFO(LOGGER,
   //   "centroid = %.3f %.3f %.3f",
@@ -954,6 +979,8 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       auto _it = std::max_element(tmp_score.begin(), tmp_score.end());
       int _index = static_cast<int>(std::distance(tmp_score.begin(), _it));
 
+      // RCLCPP_WARN(LOGGER, "Best cluster index: %d  (score: %.3f)", _index, *_it);
+
       for (std::size_t i = 0; i < number; i++)
         _tab_score.at(_index).at(flat_offset + i) = 0.0;
 
@@ -971,7 +998,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   }
 
   sensor_msgs::msg::PointCloud2 _output;
-  pcl::toROSMsg(*result_cloud_, _output);
+  pcl::toROSMsg(*cluster_cloud_, _output);
   _output.header = cloud_msg->header;
   pub_filtered_->publish(_output);
 

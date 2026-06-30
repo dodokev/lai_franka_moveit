@@ -28,6 +28,13 @@
 
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 namespace mtc = moveit::task_constructor;
+using namespace std::chrono_literals;
+
+/**
+ * MTC take a shot of octomap
+ * Then save the place of object of save
+ * During Execution if object move (pose different of save pose) then replan
+ */
 
 class MTCTaskNode {
  public:
@@ -41,6 +48,8 @@ class MTCTaskNode {
   bool doTask();
 
 private:
+  rclcpp::Client<franka_moveit_msg::srv::EnableCreate>::SharedPtr client_;
+
   // Compose an MTC task from a series of stages.
   void createPickTask();
   void createPlaceTask(mtc::Stage* monitored);
@@ -108,6 +117,14 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
 
   task_.loadRobotModel(node_);
   model_ = task_.getRobotModel();
+  client_ = node_->create_client<franka_moveit_msg::srv::EnableCreate>("enable_create");
+
+  while (!client_->wait_for_service(1s)) {
+    if (!rclcpp::ok()) {
+      RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
+    }
+    RCLCPP_INFO(LOGGER, "service not available, waiting again...");
+  }
 }
 
 rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseInterface() {
@@ -147,6 +164,22 @@ void MTCTaskNode::setupPlanningScene() {
 
   moveit::planning_interface::PlanningSceneInterface psi;
   // psi.applyCollisionObject(object);
+
+  auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
+  request->enable = true;
+  
+  auto result = client_->async_send_request(request);
+  while (rclcpp::ok())
+  {
+    auto status = result.wait_for(std::chrono::milliseconds(100));
+    if (status == std::future_status::ready)
+    {
+      auto response = result.get();
+      RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
+      RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
+      break;
+    }
+  }
 }
 
 bool MTCTaskNode::setupPlanner() {
@@ -654,6 +687,8 @@ bool MTCTaskNode::executeTask()
     stage_names.push_back((*container)[i]->name());
   }
 
+  auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
+
   const auto* seq = dynamic_cast<const mtc::SolutionSequence*>(solution.get());
   for (auto* s : seq->solutions())
   {
@@ -663,45 +698,47 @@ bool MTCTaskNode::executeTask()
 
     if (stage_failed_ == "liftObject")
     {
-      // ==================================================================================================
-      // -- SERVICE TO SEND CARTESIAN TRAJECTORY TO CUSTOM CONTROLLER --
-      rclcpp::Client<franka_moveit_msg::srv::EnableCreate>::SharedPtr client =
-          node_->create_client<franka_moveit_msg::srv::EnableCreate>("enable_create");
+      request->enable = false;
       
-      auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
-      request->enable = true;
-      
-      using namespace std::chrono_literals;
-      while (!client->wait_for_service(1s)) {
-          if (!rclcpp::ok()) {
-          RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
-          return 0;
-          }
-          RCLCPP_INFO(LOGGER, "service not available, waiting again...");
-      }
-      
-      auto result = client->async_send_request(request);
-      // Wait for the result.
+      auto result = client_->async_send_request(request);
       while (rclcpp::ok())
       {
-          auto status = result.wait_for(std::chrono::milliseconds(100));
-          if (status == std::future_status::ready)
-          {
-            auto response = result.get();
-            RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
-            RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
-            break;
-          }
+        auto status = result.wait_for(std::chrono::milliseconds(100));
+        if (status == std::future_status::ready)
+        {
+          auto response = result.get();
+          RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
+          RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
+          break;
+        }
       }
-      // ==================================================================================================
     } 
-    // auto result = task_.execute(*s);
-    // if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
-    // { 
-    //   RCLCPP_WARN(LOGGER, "Stage failed : %s", stage_failed_.c_str());
-    //   RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
-    //   return false;
-    // }
+
+    auto result = task_.execute(*s);
+    if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
+    { 
+      RCLCPP_WARN(LOGGER, "Stage failed : %s", stage_failed_.c_str());
+      RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
+      return false;
+    }
+
+    if (stage_failed_ == "PlaceTask")
+    {
+      request->enable = true;
+      
+      auto result = client_->async_send_request(request);
+      while (rclcpp::ok())
+      {
+        auto status = result.wait_for(std::chrono::milliseconds(100));
+        if (status == std::future_status::ready)
+        {
+          auto response = result.get();
+          RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
+          RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
+          break;
+        }
+      }
+    } 
   }
 
   return true;
