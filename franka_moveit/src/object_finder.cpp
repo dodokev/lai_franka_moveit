@@ -44,9 +44,9 @@ void ObjectFinder::handle_service(
   
   RCLCPP_WARN(LOGGER, "Asking %s", request->enable ? "True" : "False");
 
-  enable_create = request->enable;
+  enable_create_ = request->enable;
 
-  response->current = enable_create;
+  response->current = enable_create_;
   response->success = true;
 }
 
@@ -862,7 +862,7 @@ void ObjectFinder::createObstacle(Eigen::Affine3d& pose, const std::vector<doubl
 
 // ────────────────────────────────────────────────────────────────────────────
 void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg) {
-  if (!begin_)
+  if (!begin_ && !enable_create_)
     return;
 
   pcl::fromROSMsg(*cloud_msg, *cloud_);
@@ -1010,7 +1010,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     auto dim  = objects_[n_object].dimension;
 
     for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
-      if (!objects_[n_object].created[counter] && enable_create)
+      if (!objects_[n_object].created[counter])
       {
         auto pose = objects_[n_object].poses[counter];
         Eigen::Quaterniond quat(pose.rotation());

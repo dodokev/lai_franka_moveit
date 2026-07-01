@@ -26,15 +26,17 @@
 #include <functional>
 #include "franka_moveit_msg/srv/enable_create.hpp"
 
+/**
+ * TimerBase to check object position, need to be stop at certain stage, runnin during other
+ * Change how object detected (add visual detection, not only point cloud fitting) --> imagproc (only pick certain color)
+ *    avoid failure from poit cloud zhen moving object
+ * Maybe separate the connect and approach stage : planAndExecute until grasp
+ * 
+ */
+
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 namespace mtc = moveit::task_constructor;
 using namespace std::chrono_literals;
-
-/**
- * MTC take a shot of octomap
- * Then save the place of object of save
- * During Execution if object move (pose different of save pose) then replan
- */
 
 class MTCTaskNode {
  public:
@@ -42,13 +44,16 @@ class MTCTaskNode {
 
   MTCTaskNode(const rclcpp::NodeOptions& options);
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
-  void setupPlanningScene();
+  bool setupPlanningScene();
   bool setupPlanner();
   
   bool doTask();
 
 private:
   rclcpp::Client<franka_moveit_msg::srv::EnableCreate>::SharedPtr client_;
+
+  bool checkObjectDistance(double tol);
+  void setupObjectPose();
 
   // Compose an MTC task from a series of stages.
   void createPickTask();
@@ -60,6 +65,8 @@ private:
   void addCurrentStage();
   void addAttachStage(std::string object_name);
   void addLiftStage(double min, double max);
+
+  bool sendRequest(bool req);
 
   mtc::Stage* current_state_ptr_{nullptr};
   mtc::Stage* attach_stage_ptr_{nullptr};
@@ -81,9 +88,6 @@ private:
   double margin_{0.0035};
   double hand_max{0.034};
 
-  geometry_msgs::msg::Point position_;
-  geometry_msgs::msg::Quaternion orientation_;
-
   SHAPE type_{SHAPE::NONE};
 
   mtc::Task task_;
@@ -98,22 +102,37 @@ private:
   unsigned int recovery_done_{0};
 
   std::string object_name_;
+  geometry_msgs::msg::Pose object_pose_;
+  moveit::planning_interface::PlanningSceneInterface psi;
 };
+
+bool MTCTaskNode::sendRequest(bool req)
+{
+  auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
+  request->enable = req;
+  
+  auto result = client_->async_send_request(request);
+  while (rclcpp::ok())
+  {
+    auto status = result.wait_for(std::chrono::milliseconds(100));
+    if (status == std::future_status::ready)
+    {
+      auto response = result.get();
+      return response->success;
+      // break;
+    }
+  }
+
+  return false;
+}
 
 MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
   : node_{std::make_shared<rclcpp::Node>("mtc_node", options)} {
-  position_.x = 0.5;
-  position_.y = -0.25;
-  position_.z = 0.0;
-
-  orientation_.x = 0;
-  orientation_.y = 0;
-  orientation_.z = 0;
-  orientation_.w = 1;
-
   arm_group_name_ = "fr3_arm";
   hand_group_name_ = "fr3_hand";
   hand_frame_ = "fr3_hand_tcp";
+
+  object_name_ = "object0";
 
   task_.loadRobotModel(node_);
   model_ = task_.getRobotModel();
@@ -131,55 +150,65 @@ rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseIn
   return node_->get_node_base_interface();
 }
 
-void MTCTaskNode::setupPlanningScene() {
-  moveit_msgs::msg::CollisionObject object;
-  object.id = "object0";
-  object.header.frame_id = "world";
-  object.primitives.resize(1);
-
-  // object.primitives[0].dimensions = {0.206, 0.034}; // bigger cylinder
-  object.primitives[0].dimensions = {0.185, 0.029};  // smaller cylinder
-
-  // object.primitives[0].dimensions = {0.06, 0.077, 0.284}; // box
-
-  type_ = static_cast<SHAPE>(object.primitives[0].dimensions.size());
-
-  if (type_ == SHAPE::CYLINDER) {
-    object.primitives[0].type = shape_msgs::msg::SolidPrimitive::CYLINDER;
-    z_ = object.primitives[0].dimensions[0];
-    x_ = object.primitives[0].dimensions[1];
-  } else if (type_ == SHAPE::BOX) {
-    object.primitives[0].type = shape_msgs::msg::SolidPrimitive::BOX;
-    x_ = object.primitives[0].dimensions[0];
-    y_ = object.primitives[0].dimensions[1];
-    z_ = object.primitives[0].dimensions[2];
-  }
-
-  geometry_msgs::msg::Pose pose;
-  position_.z = z_ / 2 + margin_;
-  pose.position = position_;
-  pose.orientation = orientation_;
-
-  object.primitive_poses.push_back(pose);
-
-  moveit::planning_interface::PlanningSceneInterface psi;
-  // psi.applyCollisionObject(object);
-
-  auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
-  request->enable = true;
+void MTCTaskNode::setupObjectPose() {
+  std::vector<std::string> names;
+  names.push_back(object_name_);
+  auto pose_map = psi.getObjectPoses(names);
   
-  auto result = client_->async_send_request(request);
-  while (rclcpp::ok())
+  for (const auto& p : pose_map)
+    if (p.first == object_name_) {
+      object_pose_ = p.second;
+
+      break;
+    }
+}
+
+bool MTCTaskNode::setupPlanningScene() {
+  auto obj_map = psi.getObjects();
+  if (obj_map.empty()) return false;
+  
+  moveit_msgs::msg::CollisionObject obj_msg;
+  bool here{false};
+  for (const auto& obj : obj_map)
   {
-    auto status = result.wait_for(std::chrono::milliseconds(100));
-    if (status == std::future_status::ready)
+    if (obj.first == object_name_)
     {
-      auto response = result.get();
-      RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
-      RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
+      obj_msg = obj.second; 
+      here = true;
       break;
     }
   }
+  
+  if (!here) return false;
+
+  if (obj_msg.primitives.empty()) return false;
+  
+  setupObjectPose();
+
+  std::vector<double> _object_dim;
+  for (const auto& d : obj_msg.primitives[0].dimensions)
+    _object_dim.push_back(d);
+
+  // std::vector<double> dim = {0.206, 0.034}; // bigger cylinder
+  // std::vector<double> dim = {0.185, 0.029};  // smaller cylinder
+  // std::vector<double> dim = {0.06, 0.077, 0.284}; // box
+
+  type_ = static_cast<SHAPE>(_object_dim.size());
+
+  if (type_ == SHAPE::CYLINDER) {
+    z_ = _object_dim[0];
+    x_ = _object_dim[1];
+    RCLCPP_INFO(LOGGER, "Obj dim : H = %f, r = %f", _object_dim[0], _object_dim[1]);
+  } else if (type_ == SHAPE::BOX) {
+    x_ = _object_dim[0];
+    y_ = _object_dim[1];
+    z_ = _object_dim[2];
+    RCLCPP_INFO(LOGGER, "Obj dim : %f, %f, %f", _object_dim[0], _object_dim[1], _object_dim[2]);
+  }
+
+  sendRequest(true);
+
+  return true;
 }
 
 bool MTCTaskNode::setupPlanner() {
@@ -356,7 +385,7 @@ void MTCTaskNode::createPickTask() {
       stage->properties().configureInitFrom(mtc::Stage::PARENT);
       stage->properties().set("marker_ns", "grasp");
       stage->setPreGraspPose("open");
-      stage->setObject("object0");
+      stage->setObject(object_name_);
       if (type_ == SHAPE::BOX)
         stage->setAngleDelta(M_PI / 2);
       else if (type_ == SHAPE::CYLINDER)
@@ -404,7 +433,7 @@ void MTCTaskNode::createPickTask() {
       stage->properties().configureInitFrom(mtc::Stage::PARENT);
       stage->properties().set("marker_ns", "grasp");
       stage->setPreGraspPose("open");
-      stage->setObject("object0");
+      stage->setObject(object_name_);
       if (type_ == SHAPE::BOX)
         stage->setAngleDelta(M_PI / 2);
       else if (type_ == SHAPE::CYLINDER)
@@ -457,7 +486,7 @@ void MTCTaskNode::createPickTask() {
     {
       auto stage =
           std::make_unique<mtc::stages::ModifyPlanningScene>("allowCollision");
-      stage->allowCollisions("object0",
+      stage->allowCollisions(object_name_,
                              task_.getRobotModel()
                                  ->getJointModelGroup(hand_group_name_)
                                  ->getLinkModelNamesWithCollisionGeometry(),
@@ -474,7 +503,7 @@ void MTCTaskNode::createPickTask() {
 
     {
       auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
-      stage->attachObject("object0", hand_frame_);
+      stage->attachObject(object_name_, hand_frame_);
       attach_stage_ptr_ = stage.get();
       container->insert(std::move(stage));
     }
@@ -533,7 +562,7 @@ void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
       auto stage = std::make_unique<mtc::stages::GeneratePlacePose>("generatePose");
       stage->properties().configureInitFrom(mtc::Stage::PARENT);
       stage->properties().set("marker_ns", "pose");
-      stage->setObject("object0");
+      stage->setObject(object_name_);
 
       geometry_msgs::msg::PoseStamped target_pose_msg;
       target_pose_msg.header.frame_id = "world";
@@ -547,7 +576,7 @@ void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
       auto wrapper = std::make_unique<mtc::stages::ComputeIK>("poseIK", std::move(stage));
       wrapper->setMaxIKSolutions(2);
       wrapper->setMinSolutionDistance(1.0);
-      wrapper->setIKFrame("object0");
+      wrapper->setIKFrame(object_name_);
       wrapper->properties().configureInitFrom(mtc::Stage::PARENT, {"eef", "group"});
       wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, {"target_pose"});
       container->insert(std::move(wrapper));
@@ -570,7 +599,7 @@ void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
 
     {
       auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("forbidCollision");
-      stage->allowCollisions("object0",
+      stage->allowCollisions(object_name_,
                              task_.getRobotModel()
                                  ->getJointModelGroup(hand_group_name_)
                                  ->getLinkModelNamesWithCollisionGeometry(),
@@ -580,7 +609,7 @@ void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
 
     {
       auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("detachObject");
-      stage->detachObject("object0", hand_frame_);
+      stage->detachObject(object_name_, hand_frame_);
       container->insert(std::move(stage));
     }
 
@@ -665,14 +694,50 @@ void MTCTaskNode::fillTask()
   }
   else if (stage_failed_ == "liftObject")
   {
-    // addAttachStage("object0");
+    // addAttachStage(object_name_);
     addLiftStage(0.05, 0.15);
     createPlaceTask(current_state_ptr_);
   }
   else if (stage_failed_ == "PlaceTask") {
-    // addAttachStage("object0");
+    // addAttachStage(object_name_);
     createPlaceTask(current_state_ptr_);
   }
+}
+
+Eigen::Vector3d getPosition(geometry_msgs::msg::Pose p) {
+  return Eigen::Vector3d(p.position.x, p.position.y, p.position.z); 
+}
+
+bool MTCTaskNode::checkObjectDistance(double tol) {
+  std::vector<std::string> names;
+  names.push_back(object_name_);
+  auto pose_map = psi.getObjectPoses(names);
+
+  geometry_msgs::msg::Pose current_pose;
+  bool here{false};
+  
+  for (const auto& p : pose_map)
+    if (p.first == object_name_) {
+      current_pose = p.second;
+      here = true;
+      break;
+    }
+
+  if (!here) return false;
+
+  Eigen::Vector3d old_position = getPosition(object_pose_);
+  Eigen::Vector3d current_position = getPosition(current_pose);
+
+  double distance = (old_position - current_position).norm();
+  RCLCPP_WARN(LOGGER, "Distance : %f", distance);
+
+  if (distance > tol)
+  {
+    RCLCPP_WARN(LOGGER, "Object Position deviates too much");
+    return false;
+  }
+  
+  return true;
 }
 
 bool MTCTaskNode::executeTask()
@@ -687,8 +752,6 @@ bool MTCTaskNode::executeTask()
     stage_names.push_back((*container)[i]->name());
   }
 
-  auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
-
   const auto* seq = dynamic_cast<const mtc::SolutionSequence*>(solution.get());
   for (auto* s : seq->solutions())
   {
@@ -697,23 +760,10 @@ bool MTCTaskNode::executeTask()
     RCLCPP_WARN(LOGGER, "Stage executing : %s", stage_failed_.c_str());
 
     if (stage_failed_ == "liftObject")
-    {
-      request->enable = false;
-      
-      auto result = client_->async_send_request(request);
-      while (rclcpp::ok())
-      {
-        auto status = result.wait_for(std::chrono::milliseconds(100));
-        if (status == std::future_status::ready)
-        {
-          auto response = result.get();
-          RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
-          RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
-          break;
-        }
-      }
-    } 
+      sendRequest(false);
 
+    // ===============================================================================================================
+    // --- Execution Code ---
     auto result = task_.execute(*s);
     if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS)
     { 
@@ -721,24 +771,10 @@ bool MTCTaskNode::executeTask()
       RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
       return false;
     }
+    // ===============================================================================================================
 
     if (stage_failed_ == "PlaceTask")
-    {
-      request->enable = true;
-      
-      auto result = client_->async_send_request(request);
-      while (rclcpp::ok())
-      {
-        auto status = result.wait_for(std::chrono::milliseconds(100));
-        if (status == std::future_status::ready)
-        {
-          auto response = result.get();
-          RCLCPP_INFO(LOGGER, "RESULT: %s", response->success ? "SUCCES" : "FAILED");
-          RCLCPP_WARN(LOGGER, "Enabled?: %s", response->current ? "True" : "False");
-          break;
-        }
-      }
-    } 
+      sendRequest(true);
   }
 
   return true;
@@ -803,7 +839,12 @@ int main(int argc, char** argv) {
   });
 
   mtc_task_node->setupPlanner();
-  mtc_task_node->setupPlanningScene();
+  if (!mtc_task_node->setupPlanningScene())
+  {
+    RCLCPP_ERROR(LOGGER, "Error during object informations setup");
+    return 0;
+  }
+
   bool value{true};
   do{
     value = mtc_task_node->doTask();

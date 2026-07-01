@@ -45,7 +45,7 @@ class ObjectFinder : public rclcpp::Node {
   ~ObjectFinder() = default;
 
  private:
-  bool enable_create{true};
+  bool enable_create_{true};
 
   rclcpp::Service<franka_moveit_msg::srv::EnableCreate>::SharedPtr service_;
   void handle_service(
