@@ -35,7 +35,6 @@ def load_yaml(package_name, file_path):
         return None
 
 def generate_launch_description():
-
     robot_ip_parameter_name = 'robot_ip'
     use_fake_hardware_parameter_name = 'use_fake_hardware'
     fake_sensor_commands_parameter_name = 'fake_sensor_commands'

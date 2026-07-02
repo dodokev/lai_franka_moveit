@@ -45,7 +45,6 @@ int main(int argc, char *argv[])
     move_group.setPlanningPipelineId("ompl");
     move_group.setPlannerId("RRTConnectkConfigDefault");
 
-    move_group.setEndEffector("tool");
     RCLCPP_INFO(LOGGER, "EE name : %s", move_group.getEndEffector().c_str());
     RCLCPP_INFO(LOGGER, "EE link : %s", move_group.getEndEffectorLink().c_str());
 
@@ -67,7 +66,7 @@ int main(int argc, char *argv[])
     geometry_msgs::msg::Pose target_pose;
     target_pose = start_pose;
 
-    target_pose.position.x += 0.05;
+    target_pose.position.x += 0.25;
     // target_pose.position.y = 0.0;
     // target_pose.position.z = 0.0;
 

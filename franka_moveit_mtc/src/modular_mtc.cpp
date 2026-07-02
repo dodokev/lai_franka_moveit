@@ -717,7 +717,7 @@ Eigen::Vector3d getPosition(geometry_msgs::msg::Pose p) {
 }
 
 void MTCTaskNode::checkObjectPosition() {
-  if (task_failed_ == "PickTask") 
+  if (stage_failed_ == "PickTask")
   {    
     std::vector<std::string> names;
     names.push_back(object_name_);
@@ -745,6 +745,8 @@ void MTCTaskNode::checkObjectPosition() {
       }
     }
   }
+  else
+    setupObjectPose();
 }
 
 bool MTCTaskNode::executeTask()

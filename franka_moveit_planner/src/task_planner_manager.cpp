@@ -22,7 +22,17 @@ bool TaskPlannerManager::initialize(const moveit::core::RobotModelConstPtr& mode
   node_->get_parameter(ns + ".config.smooth_iter", smooth_iterations_);
   node_->get_parameter(ns + ".config.smooth_step", smooth_step_size_);
   node_->get_parameter(ns + ".config.smooth_clearance_weigth", smooth_clearance_weight_);
-  
+
+  RCLCPP_WARN_STREAM(LOGGER, "Parameters : step:" << step_size_
+    << " | iter:" << max_iterations_
+    << " | bias:" << goal_bias_ 
+    << " | tol:" << goal_tolerance_
+    << " | clr:" << clearance_
+    << "\nsmoiter:" << smooth_iterations_
+    << " | smostep:" << smooth_step_size_
+    << " | smoclrw:" << smooth_clearance_weight_
+  );
+
   return true;
 }
 

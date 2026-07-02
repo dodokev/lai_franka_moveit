@@ -283,8 +283,8 @@ int main(int argc, char * argv[])
 
   // ================================================================================
 
-  const std::string plannerGroup = "panda_arm";
-  const std::string ee_link = "hand";
+  const std::string plannerGroup = "fr3_arm";
+  const std::string ee_link = "fr3_hand_tcp";
 
   using moveit::planning_interface::MoveGroupInterface;
   auto move_group = MoveGroupInterface(node, plannerGroup);
@@ -302,17 +302,17 @@ int main(int argc, char * argv[])
   // ================================================================================
   
   geometry_msgs::msg::Pose start_pose;
-  // start_pose = move_group.getCurrentPose().pose;
-  // move_group.setStartStateToCurrentState();
+  start_pose = move_group.getCurrentPose().pose;
+  move_group.setStartStateToCurrentState();
 
-  start_pose.position.x = 0.3071037828922272;
-  start_pose.position.y = -0.141447052359581;
-  start_pose.position.z = 0.4798051714897156;
+  // start_pose.position.x = 0.3071037828922272;
+  // start_pose.position.y = -0.141447052359581;
+  // start_pose.position.z = 0.4798051714897156;
   
-  start_pose.orientation.x = 0.9999999403953552;
-  start_pose.orientation.y = 0.0003082542971242219;
-  start_pose.orientation.z = -7.609510066686198e-05;
-  start_pose.orientation.w = -1.9570914446376264e-05;
+  // start_pose.orientation.x = 0.9999999403953552;
+  // start_pose.orientation.y = 0.0003082542971242219;
+  // start_pose.orientation.z = -7.609510066686198e-05;
+  // start_pose.orientation.w = -1.9570914446376264e-05;
   
   bool foundIK = robot_state->setFromIK(joint_model, start_pose);
   if (!foundIK)
@@ -326,37 +326,37 @@ int main(int argc, char * argv[])
 
   // ================================================================================
   
-  geometry_msgs::msg::Pose p1, p2, p3, p4, p5;
-  p1 = start_pose;
-  p2 = start_pose;
-  p3 = start_pose;
-  p4 = start_pose;
-  p5 = start_pose;
+  // geometry_msgs::msg::Pose p1, p2, p3, p4, p5;
+  // p1 = start_pose;
+  // p2 = start_pose;
+  // p3 = start_pose;
+  // p4 = start_pose;
+  // p5 = start_pose;
 
-  // FrontHighObstacle
-  p1.position.x = 0.4799172580242157;
-  p1.position.y = 0.1604018211364746;
-  p1.position.z = 0.4799172580242157;
+  // // FrontHighObstacle
+  // p1.position.x = 0.4799172580242157;
+  // p1.position.y = 0.1604018211364746;
+  // p1.position.z = 0.4799172580242157;
   
-  // RightLowObstacle
-  p2.position.x = 0.41365736722946167;
-  p2.position.y = 0.42433586716651917;
-  p2.position.z = 0.023705018684267998;
+  // // RightLowObstacle
+  // p2.position.x = 0.41365736722946167;
+  // p2.position.y = 0.42433586716651917;
+  // p2.position.z = 0.023705018684267998;
   
-  // AboveBox
-  p3.position.x = 0.0359041653573513;
-  p3.position.y = -0.2730054259300232;
-  p3.position.z = 0.07460930198431015;
+  // // AboveBox
+  // p3.position.x = 0.0359041653573513;
+  // p3.position.y = -0.2730054259300232;
+  // p3.position.z = 0.07460930198431015;
   
-  // BehindLowMetal
-  p4.position.x = -0.06198626384139061;
-  p4.position.y = -0.5353711247444153;
-  p4.position.z = 0.07460089027881622;
+  // // BehindLowMetal
+  // p4.position.x = -0.06198626384139061;
+  // p4.position.y = -0.5353711247444153;
+  // p4.position.z = 0.07460089027881622;
 
-  // LowStart
-  p5.position.x = 0.3071461319923401;
-  p5.position.y = -0.2932298183441162;
-  p5.position.z = 0.03889982029795647;
+  // // LowStart
+  // p5.position.x = 0.3071461319923401;
+  // p5.position.y = -0.2932298183441162;
+  // p5.position.z = 0.03889982029795647;
   
   // // FrontHighObstacle
   // p1.position.x = 0.63645;
@@ -374,11 +374,11 @@ int main(int argc, char * argv[])
   // p3.position.z = 0.023722;
 
   std::vector<geometry_msgs::msg::Pose> tab_pts;
-  tab_pts.push_back(p1);
-  tab_pts.push_back(p2);
-  tab_pts.push_back(p3);
-  tab_pts.push_back(p4);
-  tab_pts.push_back(p5);
+  // tab_pts.push_back(p1);
+  // tab_pts.push_back(p2);
+  // tab_pts.push_back(p3);
+  // tab_pts.push_back(p4);
+  // tab_pts.push_back(p5);
   
   // ================================================================================
   

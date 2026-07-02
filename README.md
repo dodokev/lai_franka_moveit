@@ -96,6 +96,7 @@ ros2 launch fr3_moveit_controller.launch.py robot_ip:=dont-care use_fake_hardwar
 
 The gripper used in the simulation is different from the real gripper of the franka_ros2 package. So if you send an action or anything related to the gripper in simulation, you have to modify your code for the real gripper.
 
+---
 ### Simple Planning
 
 To use the planning part, you have two choices, using the rviz2 interface or using some code.
@@ -108,13 +109,17 @@ If you want a simple movement (from the current pose to a goal pose). This comma
 ros2 launch franka_moveit simple.launch.py
 ```
 
+---
 ### Exploring the nullspace
 
-This launch file allow to explore the robot nullspace and plan the path from the current configuration to a goal pose. The start pose and the goal are hardcoded in the 
+This launch file allow to explore the robot nullspace and plan the path from the current configuration to a goal pose. The goal pose is hardcoded in the file. And the planner will use a 3d cartesian planner called task (3d points planning, smoothing and then IK solving).
 
-// REVIEW THE EXPLORE NULLSPACE EXECUTABLE
+```
+ros2 launch franka_moveit explore_nullspace.launch.py robot_ip:=IP use_fake_hardware:={true|false}
+```
 
-### Franka Service Class
+---
+### Franka Subscriber Node
 
 If you are annoyed to hard coded the goal pose, then you can launch the service node for MoveIt
 ```
@@ -125,14 +130,33 @@ Then you can send a topic message to /target_pose and /start_planning.
 ```
 // -- To set a goal pose
 ros2 topic pub /target_pose geometry_msgs/msg/Pose "{position: {x: X, y: Y, z: Z}, orientation: {x: X, y: Y, z: Z, w: W}}" --once
+// [Example]
+ros2 topic pub /target_pose geometry_msgs/msg/Pose "{position: {x: 0.2, y: 0, z: 0.2}, orientation: {x: 0, y: 1, z: 0, w: 0}}" --once
 
 // -- To launch the planning
 ros2 topic pub /start_planning std_msgs/msg/Empty "{}" --once
 ```
 
+---
+### Statistics Experiment
+It is a launch file only used in simulation, it will not moved the robot. The parameters are hardcoded and you need to hardcode the poses you want it to reach (geometry_msgs).
+Because it is a data getter file, you only need to launch this file with of course the hardcoded parameters, planner you want to use (OMPL ones), the target poses and the number of planning allowed.
+
+```
+ros2 launch franka_moveit statistic_exp.launch.py
+```
+
+---
 ### Configuration Planner
 
-To change the parameters of the different planner protocols, you have to modify the files named like these {planning_pipeline}_planning.yaml with planning_pipeline the name of pipeline (ompl, chomp, pilz_industrial_motion_planner).
+To change the parameters of the different planner protocols, you have to modify the files named like these {planning_pipeline}_planning.yaml with planning_pipeline the name of pipeline (ompl, chomp, pilz_industrial_motion_planner, task).
 
+---
 ## MoveIt Task Constructor
 
+Only one launch can be used :
+```
+ros2 launch franka_moveit_mtc modular_mtc.launch.py robot_ip:=IP use_fake_hardware:={true|false}
+```
+
+This launch file will, from the object found with the perception pipeline, pick it and then place it at a given position.

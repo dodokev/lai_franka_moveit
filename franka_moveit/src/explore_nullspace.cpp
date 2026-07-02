@@ -31,8 +31,8 @@ int main(int argc, char *argv[])
   auto spinner = std::thread([&executor]()
                              { executor.spin(); });
 
-  const std::string plannerGroup = "panda_arm";
-  const std::string ee = "panda_tool";
+  const std::string plannerGroup = "fr3_arm";
+  const std::string ee = "fr3_hand_tcp";
 
   using moveit::planning_interface::MoveGroupInterface;
   auto move_group = MoveGroupInterface(node, plannerGroup);
@@ -45,8 +45,7 @@ int main(int argc, char *argv[])
   move_group.setPlanningTime(1.0);
   move_group.setNumPlanningAttempts(10);
 
-  move_group.setPlanningPipelineId("ompl");
-  move_group.setPlannerId("RRTConnectkConfigDefault");
+  move_group.setPlanningPipelineId("task");
 
   namespace rvt = rviz_visual_tools;
   auto moveit_visual_tools = moveit_visual_tools::MoveItVisualTools{node, "world", rviz_visual_tools::RVIZ_MARKER_TOPIC, move_group.getRobotModel()};
@@ -183,68 +182,68 @@ int main(int argc, char *argv[])
 
   // ================================================================================
 
-  // moveit_visual_tools.publishTrajectoryLine(plan.trajectory_, joint_model);
-  // robot_trajectory::RobotTrajectory rt(move_group.getRobotModel(), plannerGroup);
-  // rt.setRobotTrajectoryMsg(*robot_state, plan.trajectory_);
-  // publishTcpTrajectory(rt, ee, marker_pub);
-  // moveit_visual_tools.trigger();
+  moveit_visual_tools.publishTrajectoryLine(plan.trajectory_, joint_model);
+  robot_trajectory::RobotTrajectory rt(move_group.getRobotModel(), plannerGroup);
+  rt.setRobotTrajectoryMsg(*robot_state, plan.trajectory_);
+  publishTcpTrajectory(rt, ee, marker_pub);
+  moveit_visual_tools.trigger();
 
   // ================================================================================
 
   // ================================================================================
   // Compute new plans
 
-  moveit::planning_interface::MoveGroupInterface::Plan from_old2new;
+  // moveit::planning_interface::MoveGroupInterface::Plan from_old2new;
 
-  // Home State
-  move_group.setStartStateToCurrentState();
+  // // Home State
+  // move_group.setStartStateToCurrentState();
 
-  // New State Target
-  std::vector<double> jp;
-  for (int i = 0; i < joints_positions.size(); i++)
-    jp.push_back(joints_positions(i));
+  // // New State Target
+  // std::vector<double> jp;
+  // for (int i = 0; i < joints_positions.size(); i++)
+  //   jp.push_back(joints_positions(i));
 
-  move_group.setJointValueTarget(jp);
+  // move_group.setJointValueTarget(jp);
 
-  do
-  {
-    pathFound = move_group.plan(from_old2new) == moveit::core::MoveItErrorCode::SUCCESS;
-  } while (!pathFound);
+  // do
+  // {
+  //   pathFound = move_group.plan(from_old2new) == moveit::core::MoveItErrorCode::SUCCESS;
+  // } while (!pathFound);
 
-  moveit::planning_interface::MoveGroupInterface::Plan replan;
+  // moveit::planning_interface::MoveGroupInterface::Plan replan;
 
-  // New State
-  robot_state->setJointGroupPositions(joint_model, joints_positions);
-  robot_state->update();
-  move_group.setStartState(*robot_state);
+  // // New State
+  // robot_state->setJointGroupPositions(joint_model, joints_positions);
+  // robot_state->update();
+  // move_group.setStartState(*robot_state);
 
-  // Target Pose
-  move_group.setPoseTarget(target_pose);
+  // // Target Pose
+  // move_group.setPoseTarget(target_pose);
 
-  do
-  {
-    pathFound = move_group.plan(replan) == moveit::core::MoveItErrorCode::SUCCESS;
-  } while (!pathFound);
+  // do
+  // {
+  //   pathFound = move_group.plan(replan) == moveit::core::MoveItErrorCode::SUCCESS;
+  // } while (!pathFound);
 
   // ================================================================================
   // Draw Path
 
-  moveit_visual_tools.publishTrajectoryLine(from_old2new.trajectory_, joint_model);
-  moveit_visual_tools.trigger();
-  moveit_visual_tools.publishTrajectoryLine(replan.trajectory_, joint_model);
-  moveit_visual_tools.trigger();
-  robot_trajectory::RobotTrajectory rt(move_group.getRobotModel(), plannerGroup);
-  rt.setRobotTrajectoryMsg(*robot_state, replan.trajectory_);
-  publishTcpTrajectory(rt, ee, marker_pub);
-  moveit_visual_tools.trigger();
+  // moveit_visual_tools.publishTrajectoryLine(from_old2new.trajectory_, joint_model);
+  // moveit_visual_tools.trigger();
+  // moveit_visual_tools.publishTrajectoryLine(replan.trajectory_, joint_model);
+  // moveit_visual_tools.trigger();
+  // robot_trajectory::RobotTrajectory rt(move_group.getRobotModel(), plannerGroup);
+  // rt.setRobotTrajectoryMsg(*robot_state, replan.trajectory_);
+  // publishTcpTrajectory(rt, ee, marker_pub);
+  // moveit_visual_tools.trigger();
 
   // ================================================================================
   // Execution
   
-  moveit_visual_tools.prompt("Next to go from Start State to New State");
-  move_group.execute(from_old2new);
-  moveit_visual_tools.prompt("Next to go to the Target Pose");
-  move_group.execute(replan);
+  // moveit_visual_tools.prompt("Next to go from Start State to New State");
+  // move_group.execute(from_old2new);
+  // moveit_visual_tools.prompt("Next to go to the Target Pose");
+  // move_group.execute(replan);
 
   // ================================================================================
   
