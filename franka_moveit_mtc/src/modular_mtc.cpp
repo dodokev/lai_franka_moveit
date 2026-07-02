@@ -32,6 +32,7 @@
  *    avoid failure from poit cloud zhen moving object
  * Maybe separate the connect and approach stage : planAndExecute until grasp
  * 
+ * 
  */
 
 static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
@@ -51,8 +52,12 @@ class MTCTaskNode {
 
 private:
   rclcpp::Client<franka_moveit_msg::srv::EnableCreate>::SharedPtr client_;
+  
+  rclcpp::TimerBase::SharedPtr timer_;
 
-  bool checkObjectDistance(double tol);
+  bool grasped_{false};
+  double threshold_{0.1};
+  void checkObjectPosition();
   void setupObjectPose();
 
   // Compose an MTC task from a series of stages.
@@ -128,6 +133,11 @@ bool MTCTaskNode::sendRequest(bool req)
 
 MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
   : node_{std::make_shared<rclcpp::Node>("mtc_node", options)} {
+
+  timer_ = node_->create_wall_timer(
+        std::chrono::milliseconds(500),
+        std::bind(&MTCTaskNode::checkObjectPosition, this));
+
   arm_group_name_ = "fr3_arm";
   hand_group_name_ = "fr3_hand";
   hand_frame_ = "fr3_hand_tcp";
@@ -178,7 +188,7 @@ bool MTCTaskNode::setupPlanningScene() {
       break;
     }
   }
-  
+
   if (!here) return false;
 
   if (obj_msg.primitives.empty()) return false;
@@ -694,12 +704,10 @@ void MTCTaskNode::fillTask()
   }
   else if (stage_failed_ == "liftObject")
   {
-    // addAttachStage(object_name_);
     addLiftStage(0.05, 0.15);
     createPlaceTask(current_state_ptr_);
   }
   else if (stage_failed_ == "PlaceTask") {
-    // addAttachStage(object_name_);
     createPlaceTask(current_state_ptr_);
   }
 }
@@ -708,36 +716,35 @@ Eigen::Vector3d getPosition(geometry_msgs::msg::Pose p) {
   return Eigen::Vector3d(p.position.x, p.position.y, p.position.z); 
 }
 
-bool MTCTaskNode::checkObjectDistance(double tol) {
-  std::vector<std::string> names;
-  names.push_back(object_name_);
-  auto pose_map = psi.getObjectPoses(names);
-
-  geometry_msgs::msg::Pose current_pose;
-  bool here{false};
-  
-  for (const auto& p : pose_map)
+void MTCTaskNode::checkObjectPosition() {
+  if (task_failed_ == "PickTask") 
+  {    
+    std::vector<std::string> names;
+    names.push_back(object_name_);
+    auto pose_map = psi.getObjectPoses(names);
+    
+    geometry_msgs::msg::Pose current_pose;
+    
+    for (const auto& p : pose_map)
     if (p.first == object_name_) {
       current_pose = p.second;
-      here = true;
-      break;
+      Eigen::Vector3d old_position = getPosition(object_pose_);
+      Eigen::Vector3d current_position = getPosition(current_pose);
+      
+      double distance = (old_position - current_position).norm();
+      RCLCPP_WARN(LOGGER, "Distance : %f", distance);
+      
+      if (distance > threshold_)
+      {
+        RCLCPP_WARN(LOGGER, "Object Position deviates too much");
+        RCLCPP_WARN(LOGGER, "Stop Execution ...");
+
+        setupObjectPose();
+
+        task_.preempt();
+      }
     }
-
-  if (!here) return false;
-
-  Eigen::Vector3d old_position = getPosition(object_pose_);
-  Eigen::Vector3d current_position = getPosition(current_pose);
-
-  double distance = (old_position - current_position).norm();
-  RCLCPP_WARN(LOGGER, "Distance : %f", distance);
-
-  if (distance > tol)
-  {
-    RCLCPP_WARN(LOGGER, "Object Position deviates too much");
-    return false;
   }
-  
-  return true;
 }
 
 bool MTCTaskNode::executeTask()

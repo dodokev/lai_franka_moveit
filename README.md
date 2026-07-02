@@ -17,12 +17,6 @@ Moreover the rs.launch.py file and the self_filter.launch.py file won't be usabl
 # Console command to use the package (Considering the optional packages are installed)
 ## Perception
 
-The camera needs only to be connected through USB port and use the ros2 launch command.
-```
-ros2 launch franka_moveit rs.launch.py
-```
-
----
 
 The robot self filter requires the robot urdf and the parameters (scale, padding) of the collision geometries.
 ```
@@ -33,7 +27,6 @@ ros2 launch franka_moveit self_filter.launch.py robot_description:="$(xacro /{pa
 (/home/labrob/franka_ros2_ws/src/lai_franka_moveit/franka_moveit_config/config/robot_filter.yaml)
 
 ros2 launch franka_moveit self_filter.launch.py robot_description:="$(xacro /home/labrob/franka_ros2_ws/src/franka_description/robots/fr3/fr3_filter.urdf.xacro)" filter_config:=/home/labrob/franka_ros2_ws/src/lai_franka_moveit/franka_moveit_config/config/robot_filter.yaml
-
 
 The parameters can be modified in the franka_moveit_config/config/robot_filter.yaml. It is useful only if your robot urdf has simple shape as collision geometry (Sphere, Cylinder, Box). If you use meshes as collision geometry then the padding and scale doesn't work.
 
@@ -55,11 +48,6 @@ ros2 run franka_moveit object_finder
 ros2 run franka_moveit object_remover
 ```
 
-Those two nodes allow to find and remove from objects from the point cloud. They will be runned through a launch file.
-```
-ros2 launch franka_moveit object_updater
-```
-
 To add a object to find, you will need to send a message to the /add_lost_obj topic.
 
 ```
@@ -79,6 +67,12 @@ ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.206,0.034'}"
 // -- BOX : [longest,..,shortest]
 ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.255,0.153,0.112'}"
 ```
+
+To launch the perception pipeline you will need to launch the self filter launch file and the rs.launch.py
+```
+ros2 launch franka_moveit rs.launch.py
+```
+This launch file regroups everything needed to run the camera and the April Tag detection. Plus the two nodes for object detection and removal. 
 
 ## MoveIt2
 
@@ -127,5 +121,18 @@ If you are annoyed to hard coded the goal pose, then you can launch the service 
 ros2 launch franka_moveit franka.launch.py
 ```
 
-// REDO THE FRANKA SERVICE NODE
+Then you can send a topic message to /target_pose and /start_planning.
+```
+// -- To set a goal pose
+ros2 topic pub /target_pose geometry_msgs/msg/Pose "{position: {x: X, y: Y, z: Z}, orientation: {x: X, y: Y, z: Z, w: W}}" --once
+
+// -- To launch the planning
+ros2 topic pub /start_planning std_msgs/msg/Empty "{}" --once
+```
+
+### Configuration Planner
+
+To change the parameters of the different planner protocols, you have to modify the files named like these {planning_pipeline}_planning.yaml with planning_pipeline the name of pipeline (ompl, chomp, pilz_industrial_motion_planner).
+
+## MoveIt Task Constructor
 
