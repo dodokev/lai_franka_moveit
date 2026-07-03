@@ -56,6 +56,7 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 
   bool grasped_{false};
+  bool moved_{false};
   double threshold_{0.1};
   void checkObjectPosition();
   void setupObjectPose();
@@ -109,6 +110,7 @@ private:
   std::string object_name_;
   geometry_msgs::msg::Pose object_pose_;
   moveit::planning_interface::PlanningSceneInterface psi;
+  moveit_msgs::msg::Constraints constraints_;
 };
 
 bool MTCTaskNode::sendRequest(bool req)
@@ -225,6 +227,23 @@ bool MTCTaskNode::setupPlanningScene() {
 }
 
 bool MTCTaskNode::setupPlanner() {
+  moveit_msgs::msg::OrientationConstraint oc;
+  oc.header.frame_id = "world";
+  oc.link_name = "fr3_hand_tcp";
+
+  oc.orientation.x = 0.0;
+  oc.orientation.y = 1.0;
+  oc.orientation.z = 0.0;
+  oc.orientation.w = 0.0;
+
+  oc.absolute_x_axis_tolerance = 0.05;
+  oc.absolute_y_axis_tolerance = 0.05;
+  oc.absolute_z_axis_tolerance = 0.1;   // free rotation around tool axis
+
+  oc.weight = 1.0;
+
+  constraints_.orientation_constraints.push_back(oc);
+
   // auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
   // task_planner->setMaxVelocityScalingFactor(0.1);
   // task_planner->setMaxAccelerationScalingFactor(0.1);
@@ -327,6 +346,7 @@ void MTCTaskNode::addCurrentStage() {
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
+  task_.setProperty("path_constraints", constraints_);
 
   auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
   current_state_ptr_ = stage_state_current.get();
@@ -339,6 +359,7 @@ void MTCTaskNode::createPickTask() {
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
+  task_.setProperty("path_constraints", constraints_);
 
   if (!task_.getRobotModel()) {
     RCLCPP_ERROR(LOGGER, "Robot model not loaded");
@@ -491,6 +512,8 @@ void MTCTaskNode::createPickTask() {
     serial->insert(std::move(alternate));
   }
 
+  task_.add(std::move(serial));
+
   {
     auto container = std::make_unique<mtc::SerialContainer>("pickObject");
     task_.properties().exposeTo(container->properties(), {"eef", "group", "ik_frame"});
@@ -510,7 +533,7 @@ void MTCTaskNode::createPickTask() {
     {
       auto stage = std::make_unique<mtc::stages::MoveTo>("closeHand", interpolation_planner_);
       stage->setGroup(hand_group_name_);
-      stage->setGoal("close");
+      stage->setGoal("grasp");
       container->insert(std::move(stage));
     }
 
@@ -521,10 +544,8 @@ void MTCTaskNode::createPickTask() {
       container->insert(std::move(stage));
     }
 
-    serial->insert(std::move(container));
+    task_.add(std::move(container));
   }
-
-  task_.add(std::move(serial));
 }
 
 void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
@@ -533,6 +554,7 @@ void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
+  task_.setProperty("path_constraints", constraints_);
 
   auto clearance_predicate = makeClearancePredicate();
 
@@ -667,6 +689,7 @@ void MTCTaskNode::addLiftStage(double min, double max)
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
+  task_.setProperty("path_constraints", constraints_);
 
   auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
   stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
@@ -688,6 +711,7 @@ void MTCTaskNode::addAttachStage(std::string object_name)
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
+  task_.setProperty("path_constraints", constraints_);
 
   {
     auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
@@ -720,7 +744,7 @@ Eigen::Vector3d getPosition(geometry_msgs::msg::Pose p) {
 }
 
 void MTCTaskNode::checkObjectPosition() {
-  if (stage_failed_ == "PickTask")
+  if (!grasped_)
   {    
     std::vector<std::string> names;
     names.push_back(object_name_);
@@ -743,6 +767,7 @@ void MTCTaskNode::checkObjectPosition() {
         RCLCPP_WARN(LOGGER, "Stop Execution ...");
 
         task_.preempt();
+        moved_ = true;
 
         setupObjectPose();
       }
@@ -769,7 +794,7 @@ bool MTCTaskNode::executeTask()
     stage_failed_ = c->name();
     RCLCPP_WARN(LOGGER, "Stage executing : %s", stage_failed_.c_str());
 
-    if (stage_failed_ == "liftObject")
+    if (stage_failed_ == "pickObject")
       sendRequest(false);
 
     // ===============================================================================================================
@@ -784,7 +809,12 @@ bool MTCTaskNode::executeTask()
     // ===============================================================================================================
 
     if (stage_failed_ == "PlaceTask")
+    {
       sendRequest(true);
+      grasped_ = false;
+    }
+    if (stage_failed_ == "pickObject")
+      grasped_ = true;
   }
 
   return true;
@@ -816,7 +846,13 @@ bool MTCTaskNode::doTask() {
   RCLCPP_WARN(LOGGER, "Execute");
   if(!executeTask())
   {
-    if (recovery_done_ < recovery_allowed_)
+    if (moved_)
+    {
+      RCLCPP_WARN(LOGGER, "Object Moved");
+      moved_ = false;
+      return true;
+    }
+    else if (recovery_done_ < recovery_allowed_)
     {
       ++recovery_done_;
       RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);

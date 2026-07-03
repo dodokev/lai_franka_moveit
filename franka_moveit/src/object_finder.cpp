@@ -72,7 +72,8 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
       {
         ++(obj.number);
         obj.created.push_back(false);
-        
+        obj.poses.push_back(Eigen::Affine3d::Identity());
+
         exist = true;
         break;
       }
@@ -82,6 +83,7 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
   {
     objects_.push_back(Object(_type, _dim));
     objects_.back().created.push_back(false);
+    objects_.back().poses.push_back(Eigen::Affine3d::Identity());
   }
   
   begin_ = true;
@@ -765,7 +767,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   // Just because
   bias -= 0.01;
-  Eigen::Vector3d true_center = axis_center + bias * z_axis;
+  Eigen::Vector3d true_center = axis_center + (bias) * z_axis;
 
   RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
                "centroidBiasCylinder: true_center=[%.3f %.3f %.3f]", true_center.x(),
@@ -968,9 +970,10 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     auto dim    = objects_[n_object].dimension;
     auto number = objects_[n_object].number;
     
-    objects_[n_object].poses.clear();
-
+    
     for (std::size_t counter = 0; counter < number; counter++) {
+      objects_[n_object].poses[counter] = Eigen::Affine3d::Identity();
+
       // Scores of every cluster against THIS specific instance
       std::vector<double> tmp_score;
       for (std::size_t n_cluster = 0; n_cluster < nb_cluster; n_cluster++)
@@ -979,17 +982,23 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       auto _it = std::max_element(tmp_score.begin(), tmp_score.end());
       int _index = static_cast<int>(std::distance(tmp_score.begin(), _it));
 
+      
       // RCLCPP_WARN(LOGGER, "Best cluster index: %d  (score: %.3f)", _index, *_it);
-
+      
       for (std::size_t i = 0; i < number; i++)
-        _tab_score.at(_index).at(flat_offset + i) = 0.0;
-
+      _tab_score.at(_index).at(flat_offset + i) = 0.0;
+      
+      
       object_cloud_->clear();
       for (const auto& idx : cluster_indices_[_index].indices)
         object_cloud_->points.push_back(cluster_cloud_->points[idx]);
+      
+      if (*_it < 0.4)
+        continue;
 
       if (!object_cloud_->points.empty())
-        objects_[n_object].poses.push_back(centroidBias(object_cloud_, dim, type));
+        objects_[n_object].poses[counter] = centroidBias(object_cloud_, dim, type);
+      
 
       *result_cloud_ += *object_cloud_;
     }
@@ -1010,9 +1019,12 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     auto dim  = objects_[n_object].dimension;
 
     for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
-      if (!objects_[n_object].created[counter])
+      if (!objects_[n_object].created[counter] && enable_create_)
       {
-        auto pose = objects_[n_object].poses[counter];
+        Eigen::Affine3d pose = objects_[n_object].poses[counter];
+        if (pose.translation() == Eigen::Affine3d::Identity().translation())
+          continue;
+
         Eigen::Quaterniond quat(pose.rotation());
         createObstacle(pose, dim, type, counter);
         // objects_[n_object].created[counter] = true;
