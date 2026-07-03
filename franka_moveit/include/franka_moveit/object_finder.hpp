@@ -33,7 +33,9 @@ struct Object {
   
   unsigned int number;
   std::vector<Eigen::Affine3d> poses;
-  std::vector<bool> created;
+  std::vector<Eigen::Affine3d> candidates;
+
+  std::vector<int> confidences;
 
   Object(Shape& s, std::vector<double>& v) : shape(s), dimension(v), number(1) {}
 };

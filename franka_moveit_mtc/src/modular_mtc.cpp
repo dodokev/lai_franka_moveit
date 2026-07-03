@@ -27,7 +27,6 @@
 #include "franka_moveit_msg/srv/enable_create.hpp"
 
 /**
- * WARNING : octomap snapshot can lead to error
  * 
  */
 
@@ -53,7 +52,7 @@ private:
 
   bool grasped_{false};
   bool moved_{false};
-  double threshold_{0.1};
+  double threshold_{0.05};
   void checkObjectPosition();
   void setupObjectPose();
 
@@ -402,7 +401,7 @@ void MTCTaskNode::createPickTask() {
     };
 
     std::vector<Approach> approaches = {
-        {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max + 0.01 + 0.04, 0.0},
+        {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max + 0.02, 0.0},
         // {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 + 0.03, 0.0},
         {"pickBelow", Eigen::AngleAxisd(2 * M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max + 0.01, 0.0},
     };
@@ -818,7 +817,7 @@ bool MTCTaskNode::doTask() {
   setupObjectPose();
   RCLCPP_WARN(LOGGER, "Setup Pose");
   task_ = mtc::Task();
-  // task_.clear();
+  task_.setTimeout(5.0);
 
   RCLCPP_WARN(LOGGER, "FIlling");
   fillTask();

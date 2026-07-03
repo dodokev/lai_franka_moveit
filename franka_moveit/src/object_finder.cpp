@@ -3,6 +3,10 @@
 #include <pcl/filters/passthrough.h>
 #include <boost/algorithm/string/split.hpp>
 
+/**
+ * IF DETECT MULTIPLE OBJECT REVIEW HOW ORDERED
+ */
+
 static auto const LOGGER = rclcpp::get_logger("object_finder");
 
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
@@ -71,8 +75,9 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
       if (obj.dimension == _dim)
       {
         ++(obj.number);
-        obj.created.push_back(false);
         obj.poses.push_back(Eigen::Affine3d::Identity());
+        obj.candidates.push_back(Eigen::Affine3d::Identity());
+        obj.confidences.push_back(0);
 
         exist = true;
         break;
@@ -82,8 +87,9 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
   if (!exist)
   {
     objects_.push_back(Object(_type, _dim));
-    objects_.back().created.push_back(false);
     objects_.back().poses.push_back(Eigen::Affine3d::Identity());
+    objects_.back().candidates.push_back(Eigen::Affine3d::Identity());
+    objects_.back().confidences.push_back(0);
   }
   
   begin_ = true;
@@ -571,36 +577,6 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   pcl::compute3DCentroid(*obj_cloud, centroid4);
   Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
 
-  visualization_msgs::msg::Marker _marker;
-  _marker.header.frame_id = "world";
-  _marker.header.stamp = rclcpp::Clock().now();
-
-  _marker.ns = "centroid";
-  _marker.id = 0;
-  _marker.type = visualization_msgs::msg::Marker::SPHERE;
-  _marker.action = visualization_msgs::msg::Marker::ADD;
-
-  // Position = your centroid
-  _marker.pose.position.x = centroid(0);
-  _marker.pose.position.y = centroid(1);
-  _marker.pose.position.z = centroid(2);
-
-  // No rotation needed
-  _marker.pose.orientation.w = 1.0;
-
-  // Size of the sphere
-  _marker.scale.x = 0.02;
-  _marker.scale.y = 0.02;
-  _marker.scale.z = 0.02;
-
-  // Color (red here)
-  _marker.color.r = 1.0;
-  _marker.color.g = 0.0;
-  _marker.color.b = 0.0;
-  _marker.color.a = 1.0;
-
-  pub_centroid_->publish(_marker);
-
   // ---------------------------
   // 2. PCA → reliable axis direction seed
   //    For a horizontal cylinder, col(0) is always the height axis.
@@ -678,7 +654,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   Eigen::Vector2d center(cu, cv);
 
-  for (int iter = 0; iter < 10; ++iter)
+  for (int iter = 0; iter < 1000; ++iter)
   {
       Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
       Eigen::Vector2d g = Eigen::Vector2d::Zero();
@@ -686,12 +662,12 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
       for (const auto& pt : *obj_cloud)
       {
           Eigen::Vector3d p3(pt.x, pt.y, pt.z);
-
+          
           Eigen::Vector3d dp = p3 - centroid;
 
           Eigen::Vector2d p(
               dp.dot(x_axis),
-              dp.dot(y_axis));
+              dp.dot(y_axis) - 0.005);
 
           Eigen::Vector2d d = center - p;
 
@@ -714,14 +690,8 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   cu = center.x();
   cv = center.y();
 
-  // Back to 3D: axis_center = centroid + cu*ex + cv*ey
   Eigen::Vector3d correction = cu * x_axis + cv * y_axis;
-  // Eigen::Vector3d axis_center = centroid + cu * x_axis + cv * y_axis;
-  /**
-   * TRY SOMETHING TO COMPUTE, ALPHA IN RESPECT TO MIN DISTANCE POINT CLOUD AND KNOWN RADIUS
-   */
-  double alpha = 0.45;
-  Eigen::Vector3d axis_center = centroid + alpha * correction;
+  Eigen::Vector3d axis_center = centroid + correction;
  
   // RCLCPP_INFO(LOGGER,
   //   "centroid = %.3f %.3f %.3f",
@@ -736,42 +706,47 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   // ---------------------------
   // 4. Bias along Z (axial correction) — relative to axis_center now
   // ---------------------------
-  double min_t = 1e9;
-  double max_t = -1e9;
 
-  for (const auto& pt : *obj_cloud) {
-    Eigen::Vector3d p(pt.x, pt.y, pt.z);
-    double t = (p - axis_center).dot(z_axis);
-    min_t = std::min(min_t, t);
-    max_t = std::max(max_t, t);
-  }
+  // ===============================================================================
+  // Fixed to known height for now
+  Eigen::Vector3d true_center = axis_center;
+  true_center(2) = known_height / 2 + 0.01;
+  // ===============================================================================
 
-  double observed_height = max_t - min_t;
-  double bias = 0.0;
+  // double min_t = 1e9;
+  // double max_t = -1e9;
 
-  if (observed_height >= known_height * 0.85) {
-    bias = (min_t + max_t) / 2.0;
-    RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-                 "centroidBiasCylinder: both caps visible, bias=%.3f", bias);
-  } else {
-    if (std::abs(max_t) >= std::abs(min_t)) {
-      bias = max_t - known_height / 2.0;
-      RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-                   "centroidBiasCylinder: max cap anchor (max_t=%.3f), bias=%.3f", max_t, bias);
-    } else {
-      bias = min_t + known_height / 2.0;
-      RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-                   "centroidBiasCylinder: min cap anchor (min_t=%.3f), bias=%.3f", min_t, bias);
-    }
-  }
+  // for (const auto& pt : *obj_cloud) {
+  //   Eigen::Vector3d p(pt.x, pt.y, pt.z);
+  //   double t = (p - axis_center).dot(z_axis);
+  //   min_t = std::min(min_t, t);
+  //   max_t = std::max(max_t, t);
+  // }
 
-  // Just because
-  bias -= 0.01;
-  Eigen::Vector3d true_center = axis_center + (bias) * z_axis;
+  // double observed_height = max_t - min_t;
+  // double bias = 0.0;
 
-  RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-               "centroidBiasCylinder: true_center=[%.3f %.3f %.3f]", true_center.x(),
-               true_center.y(), true_center.z());
+  // if (observed_height >= known_height * 0.85) {
+  //   bias = (min_t + max_t) / 2.0;
+  //   RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
+  //                "centroidBiasCylinder: both caps visible, bias=%.3f", bias);
+  // } else {
+  //   if (std::abs(max_t) >= std::abs(min_t)) {
+  //     bias = max_t - known_height / 2.0;
+  //     RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
+  //                  "centroidBiasCylinder: max cap anchor (max_t=%.3f), bias=%.3f", max_t, bias);
+  //   } else {
+  //     bias = min_t + known_height / 2.0;
+  //     RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
+  //                  "centroidBiasCylinder: min cap anchor (min_t=%.3f), bias=%.3f", min_t, bias);
+  //   }
+  // }
+
+  // Eigen::Vector3d true_center = axis_center + (bias) * z_axis;
+
+  // RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
+  //              "centroidBiasCylinder: true_center=[%.3f %.3f %.3f]", true_center.x(),
+              //  true_center.y(), true_center.z());
 
   // ---------------------------
   // 6. Build final pose
@@ -783,6 +758,36 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   pose.linear() = R;
   pose.translation() = true_center;
+
+  visualization_msgs::msg::Marker _marker;
+  _marker.header.frame_id = "world";
+  _marker.header.stamp = rclcpp::Clock().now();
+
+  _marker.ns = "centroid";
+  _marker.id = 0;
+  _marker.type = visualization_msgs::msg::Marker::SPHERE;
+  _marker.action = visualization_msgs::msg::Marker::ADD;
+
+  // Position = your centroid
+  _marker.pose.position.x = true_center(0);
+  _marker.pose.position.y = true_center(1);
+  _marker.pose.position.z = true_center(2);
+
+  // No rotation needed
+  _marker.pose.orientation.w = 1.0;
+
+  // Size of the sphere
+  _marker.scale.x = 0.02;
+  _marker.scale.y = 0.02;
+  _marker.scale.z = 0.02;
+
+  // Color (red here)
+  _marker.color.r = 1.0;
+  _marker.color.g = 0.0;
+  _marker.color.b = 0.0;
+  _marker.color.a = 1.0;
+
+  pub_centroid_->publish(_marker);
 
   return pose;
 }
@@ -996,9 +1001,23 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       if (*_it < 0.4)
         continue;
 
-      if (!object_cloud_->points.empty())
-        objects_[n_object].poses[counter] = centroidBias(object_cloud_, dim, type);
+      // =====================================================================================================
+      // Pose computation part
       
+
+      if (!object_cloud_->points.empty())
+      {
+        Eigen::Affine3d current_pose = centroidBias(object_cloud_, dim, type);
+        Eigen::Vector3d current_position = current_pose.translation();
+        Eigen::Quaterniond current_quat(current_pose.rotation());
+        
+        Eigen::Affine3d stable_pose = objects_[n_object].poses[counter];
+        Eigen::Vector3d stable_position = stable_pose.translation();
+        Eigen::Quaterniond stable_quat(stable_pose.rotation());
+
+        
+      }
+      // =====================================================================================================
 
       *result_cloud_ += *object_cloud_;
     }
@@ -1019,7 +1038,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     auto dim  = objects_[n_object].dimension;
 
     for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
-      if (!objects_[n_object].created[counter] && enable_create_)
+      if (enable_create_)
       {
         Eigen::Affine3d pose = objects_[n_object].poses[counter];
         if (pose.translation() == Eigen::Affine3d::Identity().translation())

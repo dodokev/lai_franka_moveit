@@ -16,7 +16,7 @@ CloudToWorld::CloudToWorld()
     target_frame_ = this->get_parameter("target_frame").as_string();
 
     sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(input_topic_, rclcpp::SensorDataQoS(), std::bind(&CloudToWorld::callback, this, std::placeholders::_1));
-    pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(output_topic_, 10);
+    pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(output_topic_, rclcpp::SensorDataQoS());
 }
 
 void CloudToWorld::callback(const sensor_msgs::msg::PointCloud2 msg)
