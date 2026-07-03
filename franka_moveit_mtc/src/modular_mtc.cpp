@@ -27,11 +27,7 @@
 #include "franka_moveit_msg/srv/enable_create.hpp"
 
 /**
- * TimerBase to check object position, need to be stop at certain stage, runnin during other
- * Change how object detected (add visual detection, not only point cloud fitting) --> imagproc (only pick certain color)
- *    avoid failure from poit cloud zhen moving object
- * Maybe separate the connect and approach stage : planAndExecute until grasp
- * 
+ * WARNING : octomap snapshot can lead to error
  * 
  */
 
@@ -174,8 +170,10 @@ void MTCTaskNode::setupObjectPose() {
     if (p.first == object_name_) {
       object_pose_ = p.second;
 
-      break;
+      return;
     }
+
+  setupObjectPose();
 }
 
 bool MTCTaskNode::setupPlanningScene() {
@@ -404,10 +402,9 @@ void MTCTaskNode::createPickTask() {
     };
 
     std::vector<Approach> approaches = {
-        {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max + 0.01,
-         0.0},
-        {"pickBelow", Eigen::AngleAxisd(2 * M_PI, Eigen::Vector3d::UnitX()),
-         z_ / 2 - hand_max + 0.01, 0.0},
+        {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max + 0.01 + 0.04, 0.0},
+        // {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 + 0.03, 0.0},
+        {"pickBelow", Eigen::AngleAxisd(2 * M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max + 0.01, 0.0},
     };
 
     for (const auto& approach : approaches) {
@@ -724,7 +721,8 @@ void MTCTaskNode::addAttachStage(std::string object_name)
 void MTCTaskNode::fillTask()
 {
   addCurrentStage();
-  if (stage_failed_ == "PickTask" || stage_failed_ == "") {
+  if (stage_failed_ == "PickTask" || stage_failed_ == "" || stage_failed_ == "pickObject") {
+    grasped_ = false;
     createPickTask();
     addLiftStage(0.05, 0.15);
     createPlaceTask(attach_stage_ptr_);
@@ -761,15 +759,13 @@ void MTCTaskNode::checkObjectPosition() {
       double distance = (old_position - current_position).norm();
       RCLCPP_WARN(LOGGER, "Distance : %f", distance);
       
-      if (distance > threshold_)
+      if (distance > threshold_ && !moved_)
       {
         RCLCPP_WARN(LOGGER, "Object Position deviates too much");
         RCLCPP_WARN(LOGGER, "Stop Execution ...");
 
         task_.preempt();
         moved_ = true;
-
-        setupObjectPose();
       }
     }
   }
@@ -809,10 +805,7 @@ bool MTCTaskNode::executeTask()
     // ===============================================================================================================
 
     if (stage_failed_ == "PlaceTask")
-    {
       sendRequest(true);
-      grasped_ = false;
-    }
     if (stage_failed_ == "pickObject")
       grasped_ = true;
   }
@@ -821,6 +814,9 @@ bool MTCTaskNode::executeTask()
 }
 
 bool MTCTaskNode::doTask() {
+  rclcpp::sleep_for(std::chrono::milliseconds(2000));
+  setupObjectPose();
+  RCLCPP_WARN(LOGGER, "Setup Pose");
   task_ = mtc::Task();
   // task_.clear();
 
@@ -837,6 +833,13 @@ bool MTCTaskNode::doTask() {
 
   RCLCPP_WARN(LOGGER, "Plan");
   if (!task_.plan(1)) {
+    if (moved_)
+    {
+      RCLCPP_WARN(LOGGER, "Object Moved");
+      setupObjectPose();
+      moved_ = false;
+      return true;
+    }
     RCLCPP_ERROR_STREAM(LOGGER, "Task planning failed");
     return false;
   }
@@ -849,6 +852,7 @@ bool MTCTaskNode::doTask() {
     if (moved_)
     {
       RCLCPP_WARN(LOGGER, "Object Moved");
+      setupObjectPose();
       moved_ = false;
       return true;
     }

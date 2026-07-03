@@ -14,18 +14,6 @@ find_package(franka_msgs REQUIRED)
 # Custom MSG
 find_package(franka_moveit_msg REQUIRED)
 
-add_executable(safety_mtc src/safety_mtc.cpp)
-target_include_directories(safety_mtc PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>)
-target_compile_features(safety_mtc PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
-ament_target_dependencies(
-  safety_mtc
-  "moveit_task_constructor_core"
-  "rclcpp"
-  "franka_msgs"
-)
-
 add_executable(modular_mtc src/modular_mtc.cpp)
 target_include_directories(modular_mtc PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -39,7 +27,7 @@ ament_target_dependencies(
   franka_moveit_msg
 )
 
-install(TARGETS safety_mtc modular_mtc
+install(TARGETS modular_mtc
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
