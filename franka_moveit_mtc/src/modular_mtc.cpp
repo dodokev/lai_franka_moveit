@@ -164,6 +164,9 @@ void MTCTaskNode::setupObjectPose() {
   std::vector<std::string> names;
   names.push_back(object_name_);
   auto pose_map = psi.getObjectPoses(names);
+
+  while (pose_map.empty())
+    pose_map = psi.getObjectPoses(names);
   
   for (const auto& p : pose_map)
     if (p.first == object_name_) {
@@ -739,14 +742,12 @@ void MTCTaskNode::checkObjectPosition() {
         RCLCPP_WARN(LOGGER, "Object Position deviates too much");
         RCLCPP_WARN(LOGGER, "Stop Execution ...");
 
-        setupObjectPose();
-
         task_.preempt();
+
+        setupObjectPose();
       }
     }
   }
-  else
-    setupObjectPose();
 }
 
 bool MTCTaskNode::executeTask()

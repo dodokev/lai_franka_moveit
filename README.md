@@ -154,9 +154,9 @@ To change the parameters of the different planner protocols, you have to modify 
 ---
 ## MoveIt Task Constructor
 
-Only one launch can be used :
+There is only one launch file, that launch the MTC Node.
 ```
 ros2 launch franka_moveit_mtc modular_mtc.launch.py robot_ip:=IP use_fake_hardware:={true|false}
 ```
 
-This launch file will, from the object found with the perception pipeline, pick it and then place it at a given position.
+From the object found through the object_finder node, the MTC node will pick and lift it. Then it will move it towards a fix position (0.5, 0.25, object_height/2 + margin) and leave it.
