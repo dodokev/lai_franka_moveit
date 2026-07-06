@@ -143,7 +143,7 @@ def generate_launch_description():
     package_shared_path = get_package_share_directory(package)
     node = Node(
         package=package,
-        executable="modular_mtc",
+        executable="palette_mtc",
         output="screen",
         parameters=[
             robot_description,

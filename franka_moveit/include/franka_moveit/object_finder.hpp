@@ -35,6 +35,9 @@ struct Object {
   std::vector<Eigen::Affine3d> poses;
   std::vector<Eigen::Affine3d> candidates;
 
+  std::vector<bool> have_stable;
+  std::vector<bool> have_candidate;
+
   std::vector<int> confidences;
 
   Object(Shape& s, std::vector<double>& v) : shape(s), dimension(v), number(1) {}
@@ -43,7 +46,7 @@ struct Object {
 
 class ObjectFinder : public rclcpp::Node {
  public:
-  ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps);
+  ObjectFinder(moveit::planning_interface::PlanningSceneInterface* psi);
   ~ObjectFinder() = default;
 
  private:
@@ -83,6 +86,9 @@ class ObjectFinder : public rclcpp::Node {
   double penality_factor_{1.1};
   bool begin_{false};
 
+  Eigen::Affine3d poseMean(Eigen::Affine3d& p1, Eigen::Affine3d& p2);
+  bool closePose(Eigen::Affine3d& old, Eigen::Affine3d& current, double, double);
+
   void filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud);
   void request_callback(const std_msgs::msg::String::SharedPtr msg);
 
@@ -109,6 +115,7 @@ class ObjectFinder : public rclcpp::Node {
   Eigen::Affine3d centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, const std::vector<double>& dim);
   Eigen::Affine3d centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, const std::vector<double>& dim);
     
+  void createAllObjects();
   void createObstacle(Eigen::Affine3d& pose, const std::vector<double>& dim, const Shape& type, std::size_t& numero);
   void createBox(Eigen::Affine3d& pose, const std::vector<double>& dim, std::size_t& numero);
   void createCylinder(Eigen::Affine3d& pose, const std::vector<double>& dim, std::size_t& numero);

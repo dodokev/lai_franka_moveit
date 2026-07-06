@@ -38,7 +38,7 @@ class MTCTaskNode {
  public:
   enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
 
-  MTCTaskNode(const rclcpp::NodeOptions& options);
+  MTCTaskNode(const rclcpp::NodeOptions& options, moveit::planning_interface::PlanningSceneInterface* inteface);
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
   bool setupPlanningScene();
   bool setupPlanner();
@@ -104,7 +104,7 @@ private:
 
   std::string object_name_;
   geometry_msgs::msg::Pose object_pose_;
-  moveit::planning_interface::PlanningSceneInterface psi;
+  moveit::planning_interface::PlanningSceneInterface* psi;
   moveit_msgs::msg::Constraints constraints_;
 };
 
@@ -128,8 +128,8 @@ bool MTCTaskNode::sendRequest(bool req)
   return false;
 }
 
-MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
-  : node_{std::make_shared<rclcpp::Node>("mtc_node", options)} {
+MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options, moveit::planning_interface::PlanningSceneInterface* inteface)
+  : node_{std::make_shared<rclcpp::Node>("mtc_node", options)}, psi(inteface) {
 
   timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(500),
@@ -157,26 +157,21 @@ rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseIn
   return node_->get_node_base_interface();
 }
 
-void MTCTaskNode::setupObjectPose() {
-  std::vector<std::string> names;
-  names.push_back(object_name_);
-  auto pose_map = psi.getObjectPoses(names);
-
-  while (pose_map.empty())
-    pose_map = psi.getObjectPoses(names);
-  
-  for (const auto& p : pose_map)
-    if (p.first == object_name_) {
-      object_pose_ = p.second;
-
-      return;
+void MTCTaskNode::setupObjectPose()
+{
+    std::vector<std::string> names{object_name_};
+    while (rclcpp::ok()) {
+        auto pose_map = planning_scene_->getObjectPoses(names);
+        if (!pose_map.empty()) {
+            object_pose_ = pose_map.begin()->second;
+            return;
+        }
+        rclcpp::sleep_for(100ms);
     }
-
-  setupObjectPose();
 }
 
 bool MTCTaskNode::setupPlanningScene() {
-  auto obj_map = psi.getObjects();
+  auto obj_map = psi->getObjects();
   if (obj_map.empty()) return false;
   
   moveit_msgs::msg::CollisionObject obj_msg;
@@ -200,10 +195,6 @@ bool MTCTaskNode::setupPlanningScene() {
   std::vector<double> _object_dim;
   for (const auto& d : obj_msg.primitives[0].dimensions)
     _object_dim.push_back(d);
-
-  // std::vector<double> dim = {0.206, 0.034}; // bigger cylinder
-  // std::vector<double> dim = {0.185, 0.029};  // smaller cylinder
-  // std::vector<double> dim = {0.06, 0.077, 0.284}; // box
 
   type_ = static_cast<SHAPE>(_object_dim.size());
 
@@ -745,7 +736,7 @@ void MTCTaskNode::checkObjectPosition() {
   {    
     std::vector<std::string> names;
     names.push_back(object_name_);
-    auto pose_map = psi.getObjectPoses(names);
+    auto pose_map = psi->getObjectPoses(names);
     
     geometry_msgs::msg::Pose current_pose;
     
@@ -831,7 +822,10 @@ bool MTCTaskNode::doTask() {
   }
 
   RCLCPP_WARN(LOGGER, "Plan");
-  if (!task_.plan(1)) {
+
+  try 
+  {
+    task_.plan(1);
     if (moved_)
     {
       RCLCPP_WARN(LOGGER, "Object Moved");
@@ -839,7 +833,9 @@ bool MTCTaskNode::doTask() {
       moved_ = false;
       return true;
     }
-    RCLCPP_ERROR_STREAM(LOGGER, "Task planning failed");
+  }
+  catch (mtc::InitStageException& e) {
+    RCLCPP_ERROR_STREAM(LOGGER, e);
     return false;
   }
   
@@ -877,8 +873,9 @@ int main(int argc, char** argv) {
 
   rclcpp::NodeOptions options;
   options.automatically_declare_parameters_from_overrides(true);
+  moveit::planning_interface::PlanningSceneInterface _psi;
 
-  auto mtc_task_node = std::make_shared<MTCTaskNode>(options);
+  auto mtc_task_node = std::make_shared<MTCTaskNode>(options, &_psi);
   rclcpp::executors::MultiThreadedExecutor executor;
 
   auto spin_thread = std::make_unique<std::thread>([&executor, &mtc_task_node]() {

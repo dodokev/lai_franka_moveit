@@ -3,10 +3,6 @@
 #include <pcl/filters/passthrough.h>
 #include <boost/algorithm/string/split.hpp>
 
-/**
- * IF DETECT MULTIPLE OBJECT REVIEW HOW ORDERED
- */
-
 static auto const LOGGER = rclcpp::get_logger("object_finder");
 
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
@@ -79,6 +75,9 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
         obj.candidates.push_back(Eigen::Affine3d::Identity());
         obj.confidences.push_back(0);
 
+        obj.have_stable.push_back(false);
+        obj.have_candidate.push_back(false);
+
         exist = true;
         break;
       }
@@ -90,6 +89,8 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
     objects_.back().poses.push_back(Eigen::Affine3d::Identity());
     objects_.back().candidates.push_back(Eigen::Affine3d::Identity());
     objects_.back().confidences.push_back(0);
+    objects_.back().have_stable.push_back(false);
+    objects_.back().have_candidate.push_back(false);
   }
   
   begin_ = true;
@@ -654,34 +655,38 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   Eigen::Vector2d center(cu, cv);
 
-  for (int iter = 0; iter < 1000; ++iter)
+  for (int iter = 0; iter < 10; ++iter)
   {
       Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
       Eigen::Vector2d g = Eigen::Vector2d::Zero();
 
+      double middle = known_height/2;
       for (const auto& pt : *obj_cloud)
       {
-          Eigen::Vector3d p3(pt.x, pt.y, pt.z);
-          
-          Eigen::Vector3d dp = p3 - centroid;
+        if (pt.z > middle + 0.02 || pt.z < middle - 0.02)
+          continue;
+        
+        Eigen::Vector3d p3(pt.x, pt.y, pt.z);
+        
+        Eigen::Vector3d dp = p3 - centroid;
 
-          Eigen::Vector2d p(
-              dp.dot(x_axis),
-              dp.dot(y_axis) - 0.005);
+        Eigen::Vector2d p(
+            dp.dot(x_axis),
+            dp.dot(y_axis) - 0.005);
 
-          Eigen::Vector2d d = center - p;
+        Eigen::Vector2d d = center - p;
 
-          double dist = d.norm();
+        double dist = d.norm();
 
-          if (dist < 1e-6)
-              continue;
+        if (dist < 1e-6)
+            continue;
 
-          double r = dist - known_radius;
+        double r = dist - known_radius;
 
-          Eigen::Vector2d J = d / dist;
+        Eigen::Vector2d J = d / dist;
 
-          H += J * J.transpose();
-          g += J * r;
+        H += J * J.transpose();
+        g += J * r;
       }
 
       center -= H.ldlt().solve(g);
@@ -977,7 +982,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     
     
     for (std::size_t counter = 0; counter < number; counter++) {
-      objects_[n_object].poses[counter] = Eigen::Affine3d::Identity();
+      // objects_[n_object].poses[counter] = Eigen::Affine3d::Identity();
 
       // Scores of every cluster against THIS specific instance
       std::vector<double> tmp_score;
@@ -993,29 +998,63 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       for (std::size_t i = 0; i < number; i++)
       _tab_score.at(_index).at(flat_offset + i) = 0.0;
       
-      
       object_cloud_->clear();
       for (const auto& idx : cluster_indices_[_index].indices)
         object_cloud_->points.push_back(cluster_cloud_->points[idx]);
       
       if (*_it < 0.4)
+      {
+        objects_[n_object].poses[counter] = Eigen::Affine3d::Identity();
         continue;
+      }
 
       // =====================================================================================================
       // Pose computation part
       
-
       if (!object_cloud_->points.empty())
       {
         Eigen::Affine3d current_pose = centroidBias(object_cloud_, dim, type);
-        Eigen::Vector3d current_position = current_pose.translation();
-        Eigen::Quaterniond current_quat(current_pose.rotation());
-        
-        Eigen::Affine3d stable_pose = objects_[n_object].poses[counter];
-        Eigen::Vector3d stable_position = stable_pose.translation();
-        Eigen::Quaterniond stable_quat(stable_pose.rotation());
+        if (!objects_[n_object].have_stable[counter])
+        {
+          objects_[n_object].have_stable[counter] = true;
+          objects_[n_object].poses[counter] = current_pose;
+        }
+        else
+        {
+          Eigen::Affine3d stable_pose = objects_[n_object].poses[counter];
+          if(closePose(stable_pose, current_pose, 0.01, 0.17))
+          {
+            RCLCPP_WARN(LOGGER, "stable");
+            objects_[n_object].poses[counter] = poseMean(stable_pose, current_pose);
+          }
 
-        
+          else
+            if (!objects_[n_object].have_candidate[counter])
+            {
+              RCLCPP_WARN(LOGGER, "NEW candidate");
+              objects_[n_object].have_candidate[counter] = true;
+              objects_[n_object].candidates[counter] = current_pose;
+            }
+            else
+            {
+              Eigen::Affine3d candidate_pose = objects_[n_object].candidates[counter];
+              if (closePose(current_pose, candidate_pose, 0.01, 0.17))
+              {
+                RCLCPP_WARN(LOGGER, "Close candidate");
+                ++(objects_[n_object].confidences[counter]);
+                objects_[n_object].candidates[counter] = poseMean(candidate_pose, current_pose);
+              }
+              
+              if (objects_[n_object].confidences[counter] >= 2)
+              {
+                RCLCPP_WARN(LOGGER, "enough Condifnde");
+                objects_[n_object].confidences[counter] = 0;
+                objects_[n_object].poses[counter] = poseMean(candidate_pose, current_pose);
+                objects_[n_object].candidates[counter] = Eigen::Affine3d::Identity();
+                objects_[n_object].have_candidate[counter] = false;
+              }
+            }
+        }
       }
       // =====================================================================================================
 
@@ -1025,31 +1064,71 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     flat_offset += number;
   }
 
-  sensor_msgs::msg::PointCloud2 _output;
-  pcl::toROSMsg(*cluster_cloud_, _output);
-  _output.header = cloud_msg->header;
-  pub_filtered_->publish(_output);
+  // sensor_msgs::msg::PointCloud2 _output;
+  // pcl::toROSMsg(*cluster_cloud_, _output);
+  // _output.header = cloud_msg->header;
+  // pub_filtered_->publish(_output);
 
-  cluster_indices_.clear();
+  cluster_indices_.clear();  
 
+  if (enable_create_)
+    createAllObjects();
+}
+
+void ObjectFinder::createAllObjects()
+{
   // ── Construction of collision objects ─────────────────────────────────
   for (std::size_t n_object = 0; n_object < objects_.size(); n_object++) {
     auto type = objects_[n_object].shape;
     auto dim  = objects_[n_object].dimension;
 
     for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
-      if (enable_create_)
-      {
+      
         Eigen::Affine3d pose = objects_[n_object].poses[counter];
         if (pose.translation() == Eigen::Affine3d::Identity().translation())
           continue;
-
-        Eigen::Quaterniond quat(pose.rotation());
+        
         createObstacle(pose, dim, type, counter);
-        // objects_[n_object].created[counter] = true;
-      }
     }
   }
+}
+
+bool ObjectFinder::closePose(Eigen::Affine3d& stable, Eigen::Affine3d& current, double pos_thrsld, double ang_thrsld)
+{
+  Eigen::Vector3d current_position = current.translation();
+  Eigen::Quaterniond current_quat(current.rotation());
+  
+  Eigen::Vector3d stable_position = stable.translation();
+  Eigen::Quaterniond stable_quat(stable.rotation());
+
+  double pos_err = (stable_position - current_position).norm();
+  bool pos_close = pos_err < pos_thrsld;
+  
+  Eigen::Quaterniond quat_err = (stable_quat.conjugate() * current_quat);
+  quat_err.normalize();
+
+  double ang_err = Eigen::AngleAxisd(quat_err).angle();
+  bool rot_close = ang_err < ang_thrsld;
+
+  return pos_close && rot_close;
+}
+
+Eigen::Affine3d ObjectFinder::poseMean(Eigen::Affine3d& p1, Eigen::Affine3d& p2)
+{
+  Eigen::Vector3d p1_position = p1.translation();
+  Eigen::Quaterniond p1_quat(p1.rotation());
+
+  Eigen::Vector3d p2_position = p2.translation();
+  Eigen::Quaterniond p2_quat(p2.rotation());
+
+  Eigen::Vector3d pos_mean = 0.5 * (p1_position + p2_position);
+  Eigen::Quaterniond quat_mean = p1_quat.slerp(0.5, p2_quat);
+
+  Eigen::Affine3d mean_pose = Eigen::Affine3d::Identity();
+  mean_pose.translation() = pos_mean;
+  mean_pose.linear() = quat_mean.toRotationMatrix();
+
+  return mean_pose;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
