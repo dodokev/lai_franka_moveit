@@ -38,7 +38,7 @@ class MTCTaskNode {
  public:
   enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
 
-  MTCTaskNode(const rclcpp::NodeOptions& options, moveit::planning_interface::PlanningSceneInterface* inteface);
+  MTCTaskNode(const rclcpp::NodeOptions& options);
   rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
   bool setupPlanningScene();
   bool setupPlanner();
@@ -127,8 +127,8 @@ bool MTCTaskNode::sendRequest(bool req)
   return false;
 }
 
-MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options, moveit::planning_interface::PlanningSceneInterface* inteface)
-  : node_{std::make_shared<rclcpp::Node>("mtc_node", options)}, psi(inteface) {
+MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
+  : node_{std::make_shared<rclcpp::Node>("mtc_node", options)} {
 
   timer_ = node_->create_wall_timer(
         std::chrono::milliseconds(500),
@@ -875,9 +875,8 @@ int main(int argc, char** argv) {
 
   rclcpp::NodeOptions options;
   options.automatically_declare_parameters_from_overrides(true);
-  moveit::planning_interface::PlanningSceneInterface _psi;
 
-  auto mtc_task_node = std::make_shared<MTCTaskNode>(options, &_psi);
+  auto mtc_task_node = std::make_shared<MTCTaskNode>(options);
   rclcpp::executors::MultiThreadedExecutor executor;
 
   auto spin_thread = std::make_unique<std::thread>([&executor, &mtc_task_node]() {
