@@ -154,9 +154,24 @@ To change the parameters of the different planner protocols, you have to modify 
 ---
 ## MoveIt Task Constructor
 
-There is only one launch file, that launch the MTC Node.
+There is multiple launch files, that run the MTC Node.
 ```
 ros2 launch franka_moveit_mtc modular_mtc.launch.py robot_ip:=IP use_fake_hardware:={true|false}
 ```
 
-From the object found through the object_finder node, the MTC node will pick and lift it. Then it will move it towards a fix position (0.5, 0.25, object_height/2 + margin) and leave it.
+From the object found through the object_finder node, this MTC node will pick and lift it. Then it will move it towards a fix position (0.5, 0.25, object_height/2 + margin) in the world frame and leave it.
+It is a single time pick and place program that allows to check if the object is pick correctly.
+
+Another file allows to put objects on a pallet.
+```
+ros2 launch franka_moveit_mtc palette_mtc.launch.py robot_ip:=IP use_fake_hardware:={true|false} nb_obj:=NB slot:="R,C" edge:="X,Y" ang:=ANGLE
+```
+
+You can put the number of objects you have, how many rows and columns, where does the first object is put, and the rotation of the pallet frame from the world frame.
+```
+// -- Example
+ros2 launch franka_moveit_mtc palette_mtc.launch.py robot_ip:=172.16.0.2 nb_obj:=3 slot:="2,2" edge:="0.5,0" ang:=0.785
+```
+On the real robot, 3 objects will be picked and placed, they will be ordered as a pack of 2 by 2. The first object is placed at x = 0.5 and y = 0. The others objects are placed next to each others into a frame rotated of 0.785 radians.
+
+If you want to create your own MTC Task then go check the [official page](https://moveit.picknik.ai/main/doc/tutorials/pick_and_place_with_moveit_task_constructor/pick_and_place_with_moveit_task_constructor.html) of moveit2

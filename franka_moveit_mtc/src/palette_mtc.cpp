@@ -4,6 +4,9 @@
 #include <moveit/task_constructor/stages.h>
 #include <moveit/task_constructor/task.h>
 
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string.hpp>
+
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 
@@ -34,11 +37,11 @@ class MTCTaskNode {
 public:
     enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
 
-    MTCTaskNode(const rclcpp::NodeOptions& options, moveit::planning_interface::PlanningSceneInterface* psi);
+    MTCTaskNode(const rclcpp::NodeOptions& options);
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
     void setupPlanner();
-    void palette(int object_number);
-
+    void palette();
+    
 private:
     rclcpp::Client<franka_moveit_msg::srv::EnableCreate>::SharedPtr client_;
     
@@ -101,8 +104,12 @@ private:
     double z_{0};
     // ---
 
-    moveit::planning_interface::PlanningSceneInterface* planning_scene_;
     moveit_msgs::msg::Constraints constraints_;
+
+    int object_number_;
+    std::pair<int, int> slot_;
+    std::pair<double, double> edge_;
+    double angle_;
 };
 
 bool MTCTaskNode::sendRequest(bool req) {
@@ -122,8 +129,8 @@ bool MTCTaskNode::sendRequest(bool req) {
     return false;
 }
 
-MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options, moveit::planning_interface::PlanningSceneInterface* psi)
-    : node_{std::make_shared<rclcpp::Node>("mtc_node", options)}, planning_scene_(psi) {
+MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
+    : node_{std::make_shared<rclcpp::Node>("mtc_node", options)} {
     timer_ = node_->create_wall_timer(std::chrono::milliseconds(500),
                                         std::bind(&MTCTaskNode::checkObjectPosition, this));
 
@@ -134,6 +141,22 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options, moveit::planning_in
     task_.loadRobotModel(node_);
     model_ = task_.getRobotModel();
     client_ = node_->create_client<franka_moveit_msg::srv::EnableCreate>("enable_create");
+
+    // node_->declare_parameter<std::string>("nb_obj");
+    // node_->declare_parameter<std::string>("slot");
+    // node_->declare_parameter<std::string>("edge");
+    // node_->declare_parameter<std::string>("ang", "0");
+
+    object_number_ = node_->get_parameter("nb_obj").as_int();
+    std::string tmp_slot = node_->get_parameter("slot").as_string();
+    std::string tmp_edge = node_->get_parameter("edge").as_string();
+    angle_ = node_->get_parameter("ang").as_double();
+
+    std::vector<std::string> _param_split;
+    boost::split(_param_split, tmp_slot, boost::is_any_of(","));
+    slot_ = {std::stoi(_param_split[0]), std::stoi(_param_split[1])};
+    boost::split(_param_split, tmp_edge, boost::is_any_of(","));
+    edge_ = {std::stod(_param_split[0]), std::stod(_param_split[1])};
 
     // while (!client_->wait_for_service(1s)) {
     // if (!rclcpp::ok()) {
@@ -150,9 +173,9 @@ rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseIn
 void MTCTaskNode::setupObjectPose(std::string& object_name)
 {
     std::vector<std::string> names{object_name};
-
+    moveit::planning_interface::PlanningSceneInterface psi;
     while (rclcpp::ok()) {
-        auto pose_map = planning_scene_->getObjectPoses(names);
+        auto pose_map = psi.getObjectPoses(names);
         if (!pose_map.empty()) {
             object_pose_ = pose_map.begin()->second;
             return;
@@ -163,7 +186,8 @@ void MTCTaskNode::setupObjectPose(std::string& object_name)
 
 bool MTCTaskNode::setupObjectInformation(std::string& object_name) {
     std::vector<std::string> names{object_name};
-    auto obj_map = planning_scene_->getObjects(names);
+     moveit::planning_interface::PlanningSceneInterface psi;
+    auto obj_map = psi.getObjects(names);
     if (obj_map.empty())
     {
         RCLCPP_ERROR(LOGGER, "Object doesn't exist");
@@ -215,18 +239,18 @@ void MTCTaskNode::setupPlanner() {
     oc.orientation.z = 0.0;
     oc.orientation.w = 0.0;
 
-    oc.absolute_x_axis_tolerance = 0.17;
-    oc.absolute_y_axis_tolerance = 0.17;
+    oc.absolute_x_axis_tolerance = 0.35;
+    oc.absolute_y_axis_tolerance = 0.35;
     oc.absolute_z_axis_tolerance = M_PI;  // free rotation around tool axis
 
     oc.weight = 1.0;
 
     constraints_.orientation_constraints.push_back(oc);
 
-    // auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
-    // task_planner->setMaxVelocityScalingFactor(0.1);
-    // task_planner->setMaxAccelerationScalingFactor(0.1);
-    // task_planner->setTimeout(10.0);
+    auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
+    task_planner->setMaxVelocityScalingFactor(0.1);
+    task_planner->setMaxAccelerationScalingFactor(0.1);
+    task_planner->setTimeout(10.0);
 
     auto rrtstar_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
     rrtstar_planner->setMaxVelocityScalingFactor(0.1);
@@ -246,7 +270,7 @@ void MTCTaskNode::setupPlanner() {
     lin_planner->setPlannerId("LIN");
 
     multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
-    // multipipeline_planner_->push_back(task_planner);
+    multipipeline_planner_->push_back(task_planner);
     // multipipeline_planner_->push_back(lin_planner);
     multipipeline_planner_->push_back(rrtstar_planner);
     multipipeline_planner_->push_back(rrtconnect_planner);
@@ -295,7 +319,7 @@ std::function<bool(const mtc::SolutionBase&, std::string&)> MTCTaskNode::makeCle
         collision_detection::DistanceResult res;
         scene->getCollisionEnv()->distanceRobot(req, res, state);
 
-        const double min_dist = 0.02;
+        const double min_dist = 0.0;
         if (res.minimum_distance.distance < min_dist)
             return false;
 
@@ -728,7 +752,8 @@ Eigen::Vector3d getPosition(geometry_msgs::msg::Pose p) {
 void MTCTaskNode::checkObjectPosition() {
     if (!grasped_) {
         std::vector<std::string> names{current_obj_};
-        auto pose_map = planning_scene_->getObjectPoses(names);
+        moveit::planning_interface::PlanningSceneInterface psi;
+        auto pose_map = psi.getObjectPoses(names);
 
         geometry_msgs::msg::Pose current_pose;
 
@@ -776,6 +801,7 @@ bool MTCTaskNode::executeTask() {
         // ===============================================================================================================
         // --- Execution Code ---
         auto result = task_.execute(*s);
+        RCLCPP_ERROR(LOGGER, "MoveIt error code: %d", result.val);
         if (result.val != moveit_msgs::msg::MoveItErrorCodes::SUCCESS) {
         RCLCPP_WARN(LOGGER, "Stage failed : %s", stage_failed_.c_str());
         RCLCPP_ERROR_STREAM(LOGGER, "Task execution failed");
@@ -851,7 +877,7 @@ bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamp
     return false;
 }
 
-void MTCTaskNode::palette(int object_number)
+void MTCTaskNode::palette()
 {
     std::string name_base{"object"};
     geometry_msgs::msg::PoseStamped target;
@@ -863,8 +889,11 @@ void MTCTaskNode::palette(int object_number)
     target.pose.orientation.z = 0.0;
     target.pose.orientation.w = 1.0;
 
-    for (int counter = 0; counter < object_number; counter++)
+    int c_r{0};
+    int c_c{0};
+    for (int counter = 0; counter < object_number_; counter++)
     {
+        RCLCPP_WARN_STREAM(LOGGER, "Slot : " << c_r << "x" << c_c);
         stage_failed_ = "";
         std::string obj_name = name_base + std::to_string(counter);
         current_obj_ = obj_name;
@@ -875,14 +904,28 @@ void MTCTaskNode::palette(int object_number)
         
         setupObjectPose(obj_name);
 
-        target.pose.position.x = 0.5;
-        target.pose.position.y = counter * (4 * y_);
+        target.pose.position.x = edge_.first + cos(angle_) * (8*x_) * c_r - sin(angle_) * (8*y_) * c_c;
+        target.pose.position.y = edge_.second + cos(angle_) * (8*y_) * c_c + sin(angle_) * (8*x_) * c_r;
+        // RCLCPP_WARN_STREAM(LOGGER, "Position : " << target.pose.position.x << " | " << target.pose.position.y);
         target.pose.position.z = z_/2 + voxel_size_/2;
 
         bool replan{true};
         do {
             replan = doTask(obj_name, target);
         } while (replan);
+
+        if (c_c < slot_.second-1)
+            ++c_c;
+        else if (c_c == slot_.second-1)
+        {
+            c_c = 0;
+            ++c_r;
+        }
+        else if (c_r == slot_.first-1)
+        {
+            RCLCPP_ERROR(LOGGER, "No more spaces for objects");
+            return;   
+        }
 
         RCLCPP_WARN(LOGGER, "Next Object");
     }
@@ -897,11 +940,8 @@ int main(int argc, char** argv) {
     rclcpp::NodeOptions options;
     options.automatically_declare_parameters_from_overrides(true);
 
-    moveit::planning_interface::PlanningSceneInterface psi;
-
-    auto mtc_task_node = std::make_shared<MTCTaskNode>(options, &psi);
+    auto mtc_task_node = std::make_shared<MTCTaskNode>(options);
     rclcpp::executors::MultiThreadedExecutor executor;
-    
 
     auto spin_thread = std::make_unique<std::thread>([&executor, &mtc_task_node]() {
         executor.add_node(mtc_task_node->getNodeBaseInterface());
@@ -910,7 +950,7 @@ int main(int argc, char** argv) {
     });
 
     mtc_task_node->setupPlanner();
-    mtc_task_node->palette(3);
+    mtc_task_node->palette();
 
     RCLCPP_INFO(LOGGER, "STOP");
     rclcpp::shutdown();

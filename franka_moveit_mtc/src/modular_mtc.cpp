@@ -104,7 +104,6 @@ private:
 
   std::string object_name_;
   geometry_msgs::msg::Pose object_pose_;
-  moveit::planning_interface::PlanningSceneInterface* psi;
   moveit_msgs::msg::Constraints constraints_;
 };
 
@@ -160,8 +159,9 @@ rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseIn
 void MTCTaskNode::setupObjectPose()
 {
     std::vector<std::string> names{object_name_};
+    moveit::planning_interface::PlanningSceneInterface psi;
     while (rclcpp::ok()) {
-        auto pose_map = planning_scene_->getObjectPoses(names);
+        auto pose_map = psi.getObjectPoses(names);
         if (!pose_map.empty()) {
             object_pose_ = pose_map.begin()->second;
             return;
@@ -171,7 +171,8 @@ void MTCTaskNode::setupObjectPose()
 }
 
 bool MTCTaskNode::setupPlanningScene() {
-  auto obj_map = psi->getObjects();
+  moveit::planning_interface::PlanningSceneInterface psi;
+  auto obj_map = psi.getObjects();
   if (obj_map.empty()) return false;
   
   moveit_msgs::msg::CollisionObject obj_msg;
@@ -736,7 +737,8 @@ void MTCTaskNode::checkObjectPosition() {
   {    
     std::vector<std::string> names;
     names.push_back(object_name_);
-    auto pose_map = psi->getObjectPoses(names);
+    moveit::planning_interface::PlanningSceneInterface psi;
+    auto pose_map = psi.getObjectPoses(names);
     
     geometry_msgs::msg::Pose current_pose;
     

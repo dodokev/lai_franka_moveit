@@ -139,6 +139,16 @@ def generate_launch_description():
     cartesian_lim_yaml = load_yaml("franka_moveit_config", "config/pilz_cartesian_limits.yaml")
     joint_lim_yaml = load_yaml("franka_moveit_config", "config/joint_limits.yaml")
 
+    nb_obj = LaunchConfiguration("nb_obj")
+    slot = LaunchConfiguration("slot")
+    edge = LaunchConfiguration("edge")
+    ang = LaunchConfiguration("ang")
+    
+    nb_obj_arg = DeclareLaunchArgument("nb_obj")
+    slot_arg = DeclareLaunchArgument("slot")
+    edge_arg = DeclareLaunchArgument("edge")
+    ang_arg = DeclareLaunchArgument("ang", default_value="0.0")
+
     package = "franka_moveit_mtc"
     package_shared_path = get_package_share_directory(package)
     node = Node(
@@ -154,6 +164,12 @@ def generate_launch_description():
             moveit_config.trajectory_execution,
             cartesian_lim_yaml,
             moveit_config.planning_pipelines,
+            {
+                "nb_obj": nb_obj,
+                "slot": slot,
+                "edge": edge,
+                "ang": ang,
+            },
         ],
         # prefix="gdb -ex run --args",
         emulate_tty=True,
@@ -167,4 +183,10 @@ def generate_launch_description():
         use_fake_hardware_arg,
         fake_sensor_commands_arg,
         db_arg,
+
+        nb_obj_arg,
+        slot_arg,
+        edge_arg,
+        ang_arg,
+
         node])
