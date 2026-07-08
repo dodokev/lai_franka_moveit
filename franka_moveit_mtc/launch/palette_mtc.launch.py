@@ -141,13 +141,15 @@ def generate_launch_description():
 
     nb_obj = LaunchConfiguration("nb_obj")
     slot = LaunchConfiguration("slot")
-    edge = LaunchConfiguration("edge")
-    ang = LaunchConfiguration("ang")
+    first_pose = LaunchConfiguration("first_pose")
+    rotation = LaunchConfiguration("rotation")
+    offset = LaunchConfiguration("offset")
     
     nb_obj_arg = DeclareLaunchArgument("nb_obj")
     slot_arg = DeclareLaunchArgument("slot")
-    edge_arg = DeclareLaunchArgument("edge")
-    ang_arg = DeclareLaunchArgument("ang", default_value="0.0")
+    first_pose_arg = DeclareLaunchArgument("first_pose")
+    rot_arg = DeclareLaunchArgument("rotation", default_value="0.0")
+    offset_arg = DeclareLaunchArgument("offset", default_value="0.0")
 
     package = "franka_moveit_mtc"
     package_shared_path = get_package_share_directory(package)
@@ -167,11 +169,11 @@ def generate_launch_description():
             {
                 "nb_obj": nb_obj,
                 "slot": slot,
-                "edge": edge,
-                "ang": ang,
+                "first_pose": first_pose,
+                "rotation": rotation,
+                "offset": offset,
             },
         ],
-        # prefix="gdb -ex run --args",
         emulate_tty=True,
     )
 
@@ -186,7 +188,8 @@ def generate_launch_description():
 
         nb_obj_arg,
         slot_arg,
-        edge_arg,
-        ang_arg,
+        first_pose_arg,
+        rot_arg,
+        offset_arg,
 
         node])

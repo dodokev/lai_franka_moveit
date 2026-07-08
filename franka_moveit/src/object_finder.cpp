@@ -672,13 +672,12 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
         Eigen::Vector2d p(
             dp.dot(x_axis),
-            dp.dot(y_axis) - 0.005);
+            dp.dot(y_axis));
 
         Eigen::Vector2d d = center - p;
-
+        
         double dist = d.norm();
-
-        if (dist < 1e-6)
+        if (dist < 1e-6 || dist > known_radius)
             continue;
 
         double r = dist - known_radius;
@@ -1025,6 +1024,9 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
           if(closePose(stable_pose, current_pose, 0.01, 0.17))
           {
             RCLCPP_WARN(LOGGER, "stable");
+            objects_[n_object].confidences[counter] = 0;
+            objects_[n_object].candidates[counter] = Eigen::Affine3d::Identity();
+            objects_[n_object].have_candidate[counter] = false;
             objects_[n_object].poses[counter] = poseMean(stable_pose, current_pose);
           }
 
@@ -1045,7 +1047,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
                 objects_[n_object].candidates[counter] = poseMean(candidate_pose, current_pose);
               }
               
-              if (objects_[n_object].confidences[counter] >= 2)
+              if (objects_[n_object].confidences[counter] >= 3)
               {
                 RCLCPP_WARN(LOGGER, "enough Condifnde");
                 objects_[n_object].confidences[counter] = 0;
