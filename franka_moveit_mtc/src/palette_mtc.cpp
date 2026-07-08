@@ -40,6 +40,7 @@ public:
     MTCTaskNode(const rclcpp::NodeOptions& options);
     rclcpp::node_interfaces::NodeBaseInterface::SharedPtr getNodeBaseInterface();
     void setupPlanner();
+    void setupPlanningScene();
     void palette();
     
 private:
@@ -113,6 +114,45 @@ private:
     double offset_;
 };
 
+void MTCTaskNode::setupPlanningScene() {
+    moveit::planning_interface::PlanningSceneInterface psi;
+    moveit_msgs::msg::CollisionObject obj_msg;
+    moveit_msgs::msg::CollisionObject obj_msg_2;
+    
+    obj_msg.id = "object0";
+    obj_msg.header.frame_id = "base";
+    obj_msg.primitives.resize(1);
+    obj_msg.primitives[0].type = shape_msgs::msg::SolidPrimitive::CYLINDER;
+    obj_msg.primitives[0].dimensions.resize(2);
+
+    obj_msg.primitives[0].dimensions[0] = 0.185; // height
+    obj_msg.primitives[0].dimensions[1] = 0.029; // radius
+    obj_msg.operation = obj_msg.ADD;
+
+    obj_msg_2 = obj_msg;
+    
+    geometry_msgs::msg::Pose pose;
+    pose.orientation.w = 1.0;
+
+    pose.position.x = 0.5;
+    pose.position.y = -0.15;
+    pose.position.z = obj_msg.primitives[0].dimensions[0]/2 + voxel_size_/2;
+
+    // 9.5x6
+    obj_msg.primitive_poses.resize(1);
+    obj_msg.primitive_poses[0] = pose;
+    psi.applyCollisionObject(obj_msg);
+
+    obj_msg_2.id = "object1";
+    pose.position.x = 0.35;
+    pose.position.y = 0.1;
+
+    // 14.5x3
+    obj_msg_2.primitive_poses.resize(1);
+    obj_msg_2.primitive_poses[0] = pose;
+    psi.applyCollisionObject(obj_msg_2);
+}
+
 bool MTCTaskNode::sendRequest(bool req) {
     auto request = std::make_shared<franka_moveit_msg::srv::EnableCreate::Request>();
     request->enable = req;
@@ -160,12 +200,12 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
     boost::split(_param_split, tmp_edge, boost::is_any_of(","));
     first_pose_ = {std::stod(_param_split[0]), std::stod(_param_split[1])};
 
-    // while (!client_->wait_for_service(1s)) {
-    // if (!rclcpp::ok()) {
-    //     RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
-    // }
-    // RCLCPP_INFO(LOGGER, "service not available, waiting again...");
-    // }
+    while (!client_->wait_for_service(1s)) {
+    if (!rclcpp::ok()) {
+        RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
+    }
+    RCLCPP_INFO(LOGGER, "service not available, waiting again...");
+    }
 }
 
 rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseInterface() {
@@ -226,7 +266,7 @@ bool MTCTaskNode::setupObjectInformation(std::string& object_name) {
         x_ = dimension_[2];
     }
 
-    // sendRequest(true);
+    sendRequest(true);
     setupObjectPose(object_name);
     return true;
 }
@@ -243,37 +283,37 @@ void MTCTaskNode::setupPlanner() {
 
     oc.absolute_x_axis_tolerance = 0.35;
     oc.absolute_y_axis_tolerance = 0.35;
-    oc.absolute_z_axis_tolerance = M_PI;  // free rotation around tool axis
+    oc.absolute_z_axis_tolerance = 2.53;  // free rotation around tool axis
 
     oc.weight = 1.0;
 
     constraints_.orientation_constraints.push_back(oc);
 
     auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
-    task_planner->setMaxVelocityScalingFactor(0.1);
-    task_planner->setMaxAccelerationScalingFactor(0.1);
+    task_planner->setMaxVelocityScalingFactor(0.2);
+    task_planner->setMaxAccelerationScalingFactor(0.2);
     task_planner->setTimeout(10.0);
 
     auto rrtstar_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
-    rrtstar_planner->setMaxVelocityScalingFactor(0.1);
-    rrtstar_planner->setMaxAccelerationScalingFactor(0.1);
+    rrtstar_planner->setMaxVelocityScalingFactor(0.2);
+    rrtstar_planner->setMaxAccelerationScalingFactor(0.2);
     rrtstar_planner->setTimeout(10.0);
     rrtstar_planner->setPlannerId("RRTstarkConfigDefault");
 
     auto rrtconnect_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
-    rrtconnect_planner->setMaxVelocityScalingFactor(0.1);
-    rrtconnect_planner->setMaxAccelerationScalingFactor(0.1);
+    rrtconnect_planner->setMaxVelocityScalingFactor(0.2);
+    rrtconnect_planner->setMaxAccelerationScalingFactor(0.2);
     rrtconnect_planner->setPlannerId("RRTConnectkConfigDefault");
 
     auto lin_planner =
         std::make_shared<mtc::solvers::PipelinePlanner>(node_, "pilz_industrial_motion_planner");
-    lin_planner->setMaxVelocityScalingFactor(0.1);
-    lin_planner->setMaxAccelerationScalingFactor(0.1);
+    lin_planner->setMaxVelocityScalingFactor(0.2);
+    lin_planner->setMaxAccelerationScalingFactor(0.2);
     lin_planner->setPlannerId("LIN");
 
     multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
-    multipipeline_planner_->push_back(task_planner);
     // multipipeline_planner_->push_back(lin_planner);
+    multipipeline_planner_->push_back(task_planner);
     multipipeline_planner_->push_back(rrtstar_planner);
     multipipeline_planner_->push_back(rrtconnect_planner);
 
@@ -321,7 +361,7 @@ std::function<bool(const mtc::SolutionBase&, std::string&)> MTCTaskNode::makeCle
         collision_detection::DistanceResult res;
         scene->getCollisionEnv()->distanceRobot(req, res, state);
 
-        const double min_dist = 0.02;
+        const double min_dist = 0.00;
         if (res.minimum_distance.distance < min_dist)
             return false;
 
@@ -390,7 +430,7 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
             mtc::stages::Connect::GroupPlannerVector{{arm_group_name_, multipipeline_planner_}});
         stage->properties().configureInitFrom(mtc::Stage::PARENT);
 
-        stage->setPathConstraints(constraints_);
+        // stage->setPathConstraints(constraints_);
 
         auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2pick", std::move(stage));
         wrapper->setPredicate(clearance_predicate);
@@ -410,10 +450,10 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
         };
 
         std::vector<Approach> approaches = {
-            {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max_ + 0.02,
+            {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max_,
             0.0},
             {"pickBelow", Eigen::AngleAxisd(2 * M_PI, Eigen::Vector3d::UnitX()),
-            z_ / 2 - hand_max_ + 0.01, 0.0},
+            z_ / 2 - hand_max_, 0.0},
         };
 
         for (const auto& approach : approaches) {
@@ -572,7 +612,7 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
             "CONNECT",
             mtc::stages::Connect::GroupPlannerVector{{arm_group_name_, multipipeline_planner_}});
         stage_move_to_place->properties().configureInitFrom(mtc::Stage::PARENT);
-        stage_move_to_place->setPathConstraints(constraints_);
+        // stage_move_to_place->setPathConstraints(constraints_);
 
         auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2place",
                                                                     std::move(stage_move_to_place));
@@ -797,8 +837,8 @@ bool MTCTaskNode::executeTask() {
         stage_failed_ = c->name();
         RCLCPP_WARN(LOGGER, "Stage executing : %s", stage_failed_.c_str());
 
-        // if (stage_failed_ == "pickObject")
-        //   sendRequest(false);
+        if (stage_failed_ == "pickObject")
+          sendRequest(false);
 
         // ===============================================================================================================
         // --- Execution Code ---
@@ -811,8 +851,8 @@ bool MTCTaskNode::executeTask() {
         }
         // ===============================================================================================================
 
-        // if (stage_failed_ == "PlaceTask")
-        //   sendRequest(true);
+        if (stage_failed_ == "PlaceTask")
+          sendRequest(true);
         if (stage_failed_ == "pickObject")
         grasped_ = true;
     }
@@ -926,7 +966,7 @@ void MTCTaskNode::palette()
             c_c = 0;
             ++c_r;
         }
-        if (c_r == slot_.first)
+        if (c_r == slot_.first && (counter+1) < object_number_)
         {
             RCLCPP_ERROR(LOGGER, "No more spaces for objects");
             return;
@@ -954,6 +994,7 @@ int main(int argc, char** argv) {
         executor.remove_node(mtc_task_node->getNodeBaseInterface());
     });
 
+    // mtc_task_node->setupPlanningScene();
     mtc_task_node->setupPlanner();
     mtc_task_node->palette();
 

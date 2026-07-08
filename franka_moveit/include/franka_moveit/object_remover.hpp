@@ -12,6 +12,13 @@
 #include <pcl/filters/crop_box.h>
 #include <moveit/planning_scene_monitor/planning_scene_monitor.h>
 
+#include <pcl/segmentation/extract_clusters.h>
+#include <pcl/segmentation/sac_segmentation.h>
+
+#include <pcl/filters/extract_indices.h>
+
+#include <pcl/search/kdtree.h>
+
 class ObjectRemover : public rclcpp::Node {
 public:
   ObjectRemover(moveit::planning_interface::PlanningSceneInterface* ps);
@@ -29,6 +36,21 @@ private:
   void callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud);  
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr remover(pcl::PointCloud<pcl::PointXYZ>::Ptr current, moveit_msgs::msg::CollisionObject& obj_msg, const std::string& parent="");
+  pcl::PointCloud<pcl::PointXYZ>::Ptr removerByCluster(pcl::PointCloud<pcl::PointXYZ>::Ptr current, moveit_msgs::msg::CollisionObject& obj_msg, const std::string& parent="");
+
+  bool pointInsideBox(
+    const pcl::PointXYZ& p,
+    const shape_msgs::msg::SolidPrimitive& primitive,
+    const geometry_msgs::msg::Pose& pose);
+
+  bool pointInsideCylinder(
+    const pcl::PointXYZ& p,
+    const shape_msgs::msg::SolidPrimitive& primitive,
+    const geometry_msgs::msg::Pose& pose);
+
+  bool pointInsideCollisionObject(
+    const pcl::PointXYZ& p,
+    const moveit_msgs::msg::CollisionObject& obj, const std::string& parent);
 
   moveit::core::RobotModelPtr robot_model_;
   moveit::core::RobotStatePtr robot_state_;

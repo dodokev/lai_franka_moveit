@@ -677,7 +677,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
         Eigen::Vector2d d = center - p;
         
         double dist = d.norm();
-        if (dist < 1e-6 || dist > known_radius)
+        if (dist < 1e-6)
             continue;
 
         double r = dist - known_radius;
@@ -763,35 +763,35 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   pose.linear() = R;
   pose.translation() = true_center;
 
-  visualization_msgs::msg::Marker _marker;
-  _marker.header.frame_id = "world";
-  _marker.header.stamp = rclcpp::Clock().now();
+  // visualization_msgs::msg::Marker _marker;
+  // _marker.header.frame_id = "world";
+  // _marker.header.stamp = rclcpp::Clock().now();
 
-  _marker.ns = "centroid";
-  _marker.id = 0;
-  _marker.type = visualization_msgs::msg::Marker::SPHERE;
-  _marker.action = visualization_msgs::msg::Marker::ADD;
+  // _marker.ns = "centroid";
+  // _marker.id = 0;
+  // _marker.type = visualization_msgs::msg::Marker::SPHERE;
+  // _marker.action = visualization_msgs::msg::Marker::ADD;
 
-  // Position = your centroid
-  _marker.pose.position.x = true_center(0);
-  _marker.pose.position.y = true_center(1);
-  _marker.pose.position.z = true_center(2);
+  // // Position = your centroid
+  // _marker.pose.position.x = true_center(0);
+  // _marker.pose.position.y = true_center(1);
+  // _marker.pose.position.z = true_center(2);
 
-  // No rotation needed
-  _marker.pose.orientation.w = 1.0;
+  // // No rotation needed
+  // _marker.pose.orientation.w = 1.0;
 
-  // Size of the sphere
-  _marker.scale.x = 0.02;
-  _marker.scale.y = 0.02;
-  _marker.scale.z = 0.02;
+  // // Size of the sphere
+  // _marker.scale.x = 0.02;
+  // _marker.scale.y = 0.02;
+  // _marker.scale.z = 0.02;
 
-  // Color (red here)
-  _marker.color.r = 1.0;
-  _marker.color.g = 0.0;
-  _marker.color.b = 0.0;
-  _marker.color.a = 1.0;
+  // // Color (red here)
+  // _marker.color.r = 1.0;
+  // _marker.color.g = 0.0;
+  // _marker.color.b = 0.0;
+  // _marker.color.a = 1.0;
 
-  pub_centroid_->publish(_marker);
+  // pub_centroid_->publish(_marker);
 
   return pose;
 }
@@ -969,6 +969,26 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     ++cluster_num;
   }
 
+  // Current pose of each objects
+  std::vector<Eigen::Vector3d> cluster_positions;
+  for (const auto& c : cluster_indices_)
+  {
+      object_cloud_->clear();
+
+      for (const auto& idx : c.indices)
+          object_cloud_->push_back(cluster_cloud_->points[idx]);
+
+      if(object_cloud_->empty())
+      {
+          cluster_positions.push_back(Eigen::Vector3d::Zero());
+          continue;
+      }
+
+      Eigen::Vector4d centroid;
+      pcl::compute3DCentroid(*object_cloud_, centroid);
+      cluster_positions.push_back(centroid.head<>(3));
+  }
+
   // ── Assignment: greedily match each object instance to its best cluster ──
   result_cloud_->clear();
   std::size_t nb_cluster = cluster_indices_.size();
@@ -981,12 +1001,24 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     
     
     for (std::size_t counter = 0; counter < number; counter++) {
-      // objects_[n_object].poses[counter] = Eigen::Affine3d::Identity();
-
       // Scores of every cluster against THIS specific instance
       std::vector<double> tmp_score;
       for (std::size_t n_cluster = 0; n_cluster < nb_cluster; n_cluster++)
-        tmp_score.push_back(_tab_score.at(n_cluster).at(flat_offset + counter));
+      {
+        double score = _tab_score.at(n_cluster).at(flat_offset + counter);
+
+        if(objects_[n_object].have_stable[counter])
+        {
+            Eigen::Vector3d old = objects_[n_object].poses[counter].translation();
+            Eigen::Vector3d detected = cluster_positions[n_cluster];
+
+            double dist = (old - detected).norm();
+            score -= dist * 2.0;
+        }
+
+        tmp_score.push_back(score);
+        // tmp_score.push_back(_tab_score.at(n_cluster).at(flat_offset + counter));
+      }
 
       auto _it = std::max_element(tmp_score.begin(), tmp_score.end());
       int _index = static_cast<int>(std::distance(tmp_score.begin(), _it));
@@ -1023,7 +1055,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
           Eigen::Affine3d stable_pose = objects_[n_object].poses[counter];
           if(closePose(stable_pose, current_pose, 0.01, 0.17))
           {
-            RCLCPP_WARN(LOGGER, "stable");
+            // RCLCPP_WARN(LOGGER, "stable");
             objects_[n_object].confidences[counter] = 0;
             objects_[n_object].candidates[counter] = Eigen::Affine3d::Identity();
             objects_[n_object].have_candidate[counter] = false;
@@ -1033,7 +1065,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
           else
             if (!objects_[n_object].have_candidate[counter])
             {
-              RCLCPP_WARN(LOGGER, "NEW candidate");
+              // RCLCPP_WARN(LOGGER, "NEW candidate");
               objects_[n_object].have_candidate[counter] = true;
               objects_[n_object].candidates[counter] = current_pose;
             }
@@ -1042,14 +1074,14 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
               Eigen::Affine3d candidate_pose = objects_[n_object].candidates[counter];
               if (closePose(current_pose, candidate_pose, 0.01, 0.17))
               {
-                RCLCPP_WARN(LOGGER, "Close candidate");
+                // RCLCPP_WARN(LOGGER, "Close candidate");
                 ++(objects_[n_object].confidences[counter]);
                 objects_[n_object].candidates[counter] = poseMean(candidate_pose, current_pose);
               }
               
               if (objects_[n_object].confidences[counter] >= 3)
               {
-                RCLCPP_WARN(LOGGER, "enough Condifnde");
+                // RCLCPP_WARN(LOGGER, "enough Condifnde");
                 objects_[n_object].confidences[counter] = 0;
                 objects_[n_object].poses[counter] = poseMean(candidate_pose, current_pose);
                 objects_[n_object].candidates[counter] = Eigen::Affine3d::Identity();
