@@ -98,7 +98,7 @@ void ObjectFinder::request_callback(const std_msgs::msg::String::SharedPtr msg)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-void ObjectFinder::retreiveObject() {  
+bool ObjectFinder::retreiveObject() {  
   pcl::SACSegmentation<pcl::PointXYZ> _seg;
   _seg.setOptimizeCoefficients(true);
   _seg.setModelType(pcl::SACMODEL_PLANE);
@@ -134,6 +134,8 @@ void ObjectFinder::retreiveObject() {
   _extract.filter(*cluster_cloud_);
 
   // BUG FIX: tree must be set before EuclideanClusterExtraction uses it
+  if (cluster_cloud_->empty())
+    return false;
   tree_->setInputCloud(cluster_cloud_);
   
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> _ec;
@@ -142,6 +144,8 @@ void ObjectFinder::retreiveObject() {
   _ec.setSearchMethod(tree_);
   _ec.setInputCloud(cluster_cloud_);
   _ec.extract(cluster_indices_);
+
+  return true;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -652,40 +656,60 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   Eigen::Vector3d x = A.colPivHouseholderQr().solve(b);
   double cu = x(0);  // circle center in 2D (relative to raw centroid)
   double cv = x(1);
-
   Eigen::Vector2d center(cu, cv);
+  
+  Eigen::Vector3d tmp_position = centroid + cu * x_axis + cv * y_axis;
+  Eigen::Vector2d tmp_center(tmp_position(0), tmp_position(1));
+
+  for (std::size_t iPt = 0; iPt < obj_cloud->size(); iPt++)
+  {
+      auto pt = obj_cloud->points[iPt];
+      if (pt.z > known_height * 0.9 || pt.z < known_height * 0.6)
+      {
+        obj_cloud->erase(obj_cloud->begin() + iPt);
+        --iPt;
+      }
+  }
+
+  sensor_msgs::msg::PointCloud2 _output;
+  pcl::toROSMsg(*obj_cloud, _output);
+  _output.header.frame_id = "world";
+  pub_filtered_->publish(_output);
 
   for (int iter = 0; iter < 10; ++iter)
   {
-      Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
-      Eigen::Vector2d g = Eigen::Vector2d::Zero();
-
-      double middle = known_height/2;
-      for (const auto& pt : *obj_cloud)
-      {
-        if (pt.z > middle + 0.02 || pt.z < middle - 0.02)
-          continue;
-        
+    
+    Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
+    Eigen::Vector2d g = Eigen::Vector2d::Zero();
+    
+    for (const auto& pt : *obj_cloud)
+    {
         Eigen::Vector3d p3(pt.x, pt.y, pt.z);
         
         Eigen::Vector3d dp = p3 - centroid;
 
         Eigen::Vector2d p(
             dp.dot(x_axis),
-            dp.dot(y_axis));
+            dp.dot(y_axis) - 0.01);
 
         Eigen::Vector2d d = center - p;
-        
         double dist = d.norm();
         if (dist < 1e-6)
-            continue;
-
+        continue;
+        
         double r = dist - known_radius;
-
+        
         Eigen::Vector2d J = d / dist;
+        
+        // Huber
+        double w = 1.0;
+        double a = std::fabs(r);
+        const double delta = 0.02;
+        if (a > delta)
+          w = delta / a;
 
-        H += J * J.transpose();
-        g += J * r;
+        H += w * J * J.transpose();
+        g += w * J * r;
       }
 
       center -= H.ldlt().solve(g);
@@ -695,8 +719,8 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   cv = center.y();
 
   Eigen::Vector3d correction = cu * x_axis + cv * y_axis;
-  Eigen::Vector3d axis_center = centroid + correction;
- 
+  Eigen::Vector3d axis_center = centroid + 0.75 * correction;
+
   // RCLCPP_INFO(LOGGER,
   //   "centroid = %.3f %.3f %.3f",
   //   centroid.x(), centroid.y(), centroid.z());
@@ -878,7 +902,8 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
   pcl::fromROSMsg(*cloud_msg, *cloud_);
 
-  retreiveObject();
+  if (!retreiveObject())
+    return;
 
   if (cluster_indices_.empty())
     return;
@@ -921,6 +946,9 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
 
     // ── Normal estimation (rebuild KdTree per cluster) ────────────────
     auto _cluster_tree = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
+    if (object_cloud_->empty())
+      return;
+
     _cluster_tree->setInputCloud(object_cloud_);
 
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> _ne;
@@ -1007,7 +1035,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       {
         double score = _tab_score.at(n_cluster).at(flat_offset + counter);
 
-        if(objects_[n_object].have_stable[counter])
+        if(objects_[n_object].have_stable[counter] && number > 1)
         {
             Eigen::Vector3d old = objects_[n_object].poses[counter].translation();
             Eigen::Vector3d detected = cluster_positions[n_cluster];
@@ -1017,6 +1045,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
         }
 
         tmp_score.push_back(score);
+        // RCLCPP_WARN(LOGGER, "Clust index: %ld  (score: %.3f)", n_cluster, score);
         // tmp_score.push_back(_tab_score.at(n_cluster).at(flat_offset + counter));
       }
 
@@ -1044,6 +1073,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       
       if (!object_cloud_->points.empty())
       {
+        // RCLCPP_WARN(LOGGER, "pose compute");
         Eigen::Affine3d current_pose = centroidBias(object_cloud_, dim, type);
         if (!objects_[n_object].have_stable[counter])
         {
@@ -1077,6 +1107,13 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
                 // RCLCPP_WARN(LOGGER, "Close candidate");
                 ++(objects_[n_object].confidences[counter]);
                 objects_[n_object].candidates[counter] = poseMean(candidate_pose, current_pose);
+              }
+              else {
+                // RCLCPP_WARN(LOGGER, "close to nothing");
+                objects_[n_object].confidences[counter] = 0;
+                objects_[n_object].poses[counter] = current_pose;
+                objects_[n_object].candidates[counter] = Eigen::Affine3d::Identity();
+                objects_[n_object].have_candidate[counter] = false;
               }
               
               if (objects_[n_object].confidences[counter] >= 3)

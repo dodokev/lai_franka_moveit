@@ -92,7 +92,7 @@ class ObjectFinder : public rclcpp::Node {
   void filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud);
   void request_callback(const std_msgs::msg::String::SharedPtr msg);
 
-  void retreiveObject();
+  bool retreiveObject();
   void getCentroidAndOBB(pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud,
                          Eigen::Vector4f& centroid,
                          pcl::PointXYZ& min,

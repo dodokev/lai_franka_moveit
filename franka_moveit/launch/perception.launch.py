@@ -185,10 +185,11 @@ def generate_launch_description():
         default_value='/points_filtered'
     )
     robot_description_arg = DeclareLaunchArgument(
-        'robot_description',
+        'robot_description'
     )
     filter_config_arg = DeclareLaunchArgument(
-        'filter_config'
+        'filter_config',
+        default_value='/home/labrob/franka_ros2_ws/src/lai_franka_moveit/franka_moveit_config/config/robot_filter.yaml',
     )
     # Declare use_sim_time argument
     use_sim_time_arg = DeclareLaunchArgument(

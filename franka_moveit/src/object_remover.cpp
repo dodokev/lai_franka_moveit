@@ -260,6 +260,9 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCl
   pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_cloud(new pcl::PointCloud<pcl::PointXYZ>);
   _extract.filter(*cluster_cloud);
 
+  if (cluster_cloud->points.empty())
+    return current;
+    
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
   tree->setInputCloud(cluster_cloud);
 

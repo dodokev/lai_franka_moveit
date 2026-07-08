@@ -748,9 +748,9 @@ void MTCTaskNode::returnHome() {
     }
 
     {
-        auto stage = std::make_unique<mtc::stages::MoveTo>("closeHand", interpolation_planner_);
+        auto stage = std::make_unique<mtc::stages::MoveTo>("openHand", interpolation_planner_);
         stage->setGroup(hand_group_name_);
-        stage->setGoal("close");
+        stage->setGoal("open");
         task_.add(std::move(stage));
     }
 
@@ -792,6 +792,9 @@ Eigen::Vector3d getPosition(geometry_msgs::msg::Pose p) {
 }
 
 void MTCTaskNode::checkObjectPosition() {
+    /**
+     * Add Prtoection
+     */
     if (!grasped_) {
         std::vector<std::string> names{current_obj_};
         moveit::planning_interface::PlanningSceneInterface psi;
@@ -802,6 +805,7 @@ void MTCTaskNode::checkObjectPosition() {
         for (const auto& p : pose_map)
         {
             current_pose = p.second;
+            
             Eigen::Vector3d old_position = getPosition(object_pose_);
             Eigen::Vector3d current_position = getPosition(current_pose);
 
@@ -882,7 +886,13 @@ bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamp
     RCLCPP_WARN(LOGGER, "Plan");
     try 
     {
-        task_.plan(1);
+        if(!task_.plan(1))
+        {
+            task_.printState();
+            RCLCPP_WARN(LOGGER, "Plan Failed, Retry ...");
+            return true;
+        }
+        RCLCPP_WARN(LOGGER, "Plan finish");
         if (moved_)
         {
             RCLCPP_WARN(LOGGER, "Object Moved");
@@ -896,6 +906,7 @@ bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamp
         return false;
     }
 
+    RCLCPP_WARN(LOGGER, "Introspection");
     task_.introspection().publishSolution(*task_.solutions().front());
 
     RCLCPP_WARN(LOGGER, "Execute");
