@@ -108,8 +108,9 @@ private:
 
     int object_number_;
     std::pair<int, int> slot_;
-    std::pair<double, double> edge_;
-    double angle_;
+    std::pair<double, double> first_pose_;
+    double rotation_;
+    double offset_;
 };
 
 bool MTCTaskNode::sendRequest(bool req) {
@@ -149,14 +150,15 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
 
     object_number_ = node_->get_parameter("nb_obj").as_int();
     std::string tmp_slot = node_->get_parameter("slot").as_string();
-    std::string tmp_edge = node_->get_parameter("edge").as_string();
-    angle_ = node_->get_parameter("ang").as_double();
+    std::string tmp_edge = node_->get_parameter("first_pose").as_string();
+    rotation_ = node_->get_parameter("rotation").as_double();
+    offset_ = node_->get_parameter("offset").as_double();
 
     std::vector<std::string> _param_split;
     boost::split(_param_split, tmp_slot, boost::is_any_of(","));
     slot_ = {std::stoi(_param_split[0]), std::stoi(_param_split[1])};
     boost::split(_param_split, tmp_edge, boost::is_any_of(","));
-    edge_ = {std::stod(_param_split[0]), std::stod(_param_split[1])};
+    first_pose_ = {std::stod(_param_split[0]), std::stod(_param_split[1])};
 
     // while (!client_->wait_for_service(1s)) {
     // if (!rclcpp::ok()) {
@@ -319,7 +321,7 @@ std::function<bool(const mtc::SolutionBase&, std::string&)> MTCTaskNode::makeCle
         collision_detection::DistanceResult res;
         scene->getCollisionEnv()->distanceRobot(req, res, state);
 
-        const double min_dist = 0.0;
+        const double min_dist = 0.02;
         if (res.minimum_distance.distance < min_dist)
             return false;
 
@@ -904,8 +906,11 @@ void MTCTaskNode::palette()
         
         setupObjectPose(obj_name);
 
-        target.pose.position.x = edge_.first + cos(angle_) * (8*x_) * c_r - sin(angle_) * (8*y_) * c_c;
-        target.pose.position.y = edge_.second + cos(angle_) * (8*y_) * c_c + sin(angle_) * (8*x_) * c_r;
+        auto e_x = (2 * x_ + offset_) * c_r;
+        auto e_y = (2 * y_ + offset_) * c_c;
+
+        target.pose.position.x = first_pose_.first + cos(rotation_) * e_x - sin(rotation_) * e_y;
+        target.pose.position.y = first_pose_.second + cos(rotation_) * e_y + sin(rotation_) * e_x;
         // RCLCPP_WARN_STREAM(LOGGER, "Position : " << target.pose.position.x << " | " << target.pose.position.y);
         target.pose.position.z = z_/2 + voxel_size_/2;
 
@@ -914,17 +919,17 @@ void MTCTaskNode::palette()
             replan = doTask(obj_name, target);
         } while (replan);
 
-        if (c_c < slot_.second-1)
+        if (c_c != slot_.second)
             ++c_c;
-        else if (c_c == slot_.second-1)
+        if (c_c == slot_.second)
         {
             c_c = 0;
             ++c_r;
         }
-        else if (c_r == slot_.first-1)
+        if (c_r == slot_.first)
         {
             RCLCPP_ERROR(LOGGER, "No more spaces for objects");
-            return;   
+            return;
         }
 
         RCLCPP_WARN(LOGGER, "Next Object");
