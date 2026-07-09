@@ -170,11 +170,13 @@ bool ObjectRemover::pointInsideCylinder(
 
 
     double dz = primitive.dimensions[shape_msgs::msg::SolidPrimitive::CYLINDER_HEIGHT] / 2.0;
-    double dx = primitive.dimensions[shape_msgs::msg::SolidPrimitive::CYLINDER_RADIUS];
+    double r = primitive.dimensions[shape_msgs::msg::SolidPrimitive::CYLINDER_RADIUS];
+
+    double r2 = local(0) * local(0) + local(1) * local(1);
 
     return 
-        std::abs(local.x()) < dx &&
-        std::abs(local.z()) < dz;
+        (r2 <= r*r) &&
+        (std::abs(local.z()) < dz);
 }
 
 bool ObjectRemover::pointInsideCollisionObject(
@@ -269,14 +271,15 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCl
   std::vector<pcl::PointIndices> cluster_indices;
 
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
-  ec.setClusterTolerance(0.02); // 2 cm
-  ec.setMinClusterSize(50);
+  ec.setClusterTolerance(0.04); // 2 cm
+  ec.setMinClusterSize(0);
   ec.setMaxClusterSize(100000);
   ec.setSearchMethod(tree);
   ec.setInputCloud(cluster_cloud);
   ec.extract(cluster_indices);
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>);
+  // RCLCPP_INFO(LOGGER, "Start remove cluster");
 
   for (const auto& indices : cluster_indices)
   {
@@ -288,6 +291,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCl
 
       if (pointInsideCollisionObject(p, obj_msg, parent))
       {
+        // RCLCPP_WARN(LOGGER, "Inside");
         collision = true;
         break;
       }
@@ -295,6 +299,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCl
 
     if (!collision)
     {
+      // RCLCPP_WARN(LOGGER, "Outside");
       for (auto idx : indices.indices)
       {
         filtered->push_back(cluster_cloud->points[idx]);
@@ -315,6 +320,7 @@ void ObjectRemover::callback(const sensor_msgs::msg::PointCloud2::SharedPtr clou
   pcl::PointCloud<pcl::PointXYZ>::Ptr current(new pcl::PointCloud<pcl::PointXYZ>(*cloud));
 
   auto object_map = planning_scene_->getObjects();
+  // RCLCPP_INFO(LOGGER, "Start remover");
   for (auto& obj : object_map)
   {
     auto& obj_msg = obj.second;

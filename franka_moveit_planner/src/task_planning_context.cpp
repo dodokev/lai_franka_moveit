@@ -442,6 +442,11 @@ void TaskPlanningContext::buildDistanceRequest()
   d_req_cache_.type                   = collision_detection::DistanceRequestType::GLOBAL;
   d_req_cache_.enable_nearest_points  = false;
   d_req_cache_.acm                    = &planning_scene_->getAllowedCollisionMatrix();
+
+  /**
+   * GET ATTACHED OBJECT PUT SAME IN THE ALLOWED COLLISION MATRIX
+   */
+
   d_req_cache_.active_components_only = &clearance_links_;
 }
 
@@ -475,20 +480,27 @@ bool TaskPlanningContext::checkSegment(
       return false;
     probe.update();
 
-    if (!need_distance)
-    {
       // Fast path: binary only — no distance query overhead.
-      if (planning_scene_->isStateColliding(probe, joint_group_->getName()))
-        return false;
-      continue;
-    }
+    if (planning_scene_->isStateColliding(probe, joint_group_->getName()))
+      return false;
 
-    // GLOBAL query — tests only clearance_links_ against the environment.
-    // d_res.minimum_distance.distance is the single closest gap.
+    if (!need_distance)
+      continue;
+
     collision_detection::DistanceResult d_res;
     planning_scene_->getCollisionEnv()->distanceRobot(d_req_cache_, d_res, probe);
-
     const double d = d_res.minimum_distance.distance;
+
+    collision_detection::DistanceRequest req;
+    req.type = collision_detection::DistanceRequestType::SINGLE;
+
+    collision_detection::DistanceResult res;
+    planning_scene_->getCollisionEnv()->distanceRobot(req, res, probe);
+
+    RCLCPP_ERROR(LOGGER, "NEXT : %f", d);
+    for (const auto& [pair, data] : res.distances)
+      RCLCPP_WARN(LOGGER, "Pair : %s | %s | %f", pair.first.c_str(), pair.second.c_str(), data[0].distance);
+
 
     if (d <= 0.0)
       return false;   // in collision

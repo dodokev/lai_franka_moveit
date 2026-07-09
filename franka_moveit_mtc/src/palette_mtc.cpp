@@ -33,6 +33,10 @@ static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 namespace mtc = moveit::task_constructor;
 using namespace std::chrono_literals;
 
+/**
+ * FIND THE FUCKING SEGEMTATIONFAULT, WHY !
+ */
+
 class MTCTaskNode {
 public:
     enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
@@ -134,9 +138,11 @@ void MTCTaskNode::setupPlanningScene() {
     geometry_msgs::msg::Pose pose;
     pose.orientation.w = 1.0;
 
-    pose.position.x = 0.5;
-    pose.position.y = -0.15;
-    pose.position.z = obj_msg.primitives[0].dimensions[0]/2 + voxel_size_/2;
+    pose.position.x = 0.3;
+    pose.position.z = 0.185;
+    // pose.position.x = 0.5;
+    // pose.position.y = -0.25;
+    // pose.position.z = obj_msg.primitives[0].dimensions[0]/2 + voxel_size_/2;
 
     // 9.5x6
     obj_msg.primitive_poses.resize(1);
@@ -148,9 +154,29 @@ void MTCTaskNode::setupPlanningScene() {
     pose.position.y = 0.1;
 
     // 14.5x3
-    obj_msg_2.primitive_poses.resize(1);
-    obj_msg_2.primitive_poses[0] = pose;
-    psi.applyCollisionObject(obj_msg_2);
+    // obj_msg_2.primitive_poses.resize(1);
+    // obj_msg_2.primitive_poses[0] = pose;
+    // psi.applyCollisionObject(obj_msg_2);
+
+    task_.setRobotModel(model_);
+
+    task_.setProperty("group", arm_group_name_);
+    task_.setProperty("eef", hand_group_name_);
+    task_.setProperty("ik_frame", hand_frame_);
+    task_.setProperty("path_constraints", constraints_);
+
+    auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
+    task_.add(std::move(stage_state_current));
+
+    auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
+    stage->attachObject("object0", hand_frame_);
+    task_.add(std::move(stage));
+
+    task_.init();
+    task_.plan(1);
+
+    auto solution = task_.solutions().front();
+    auto result = task_.execute(*solution);
 }
 
 bool MTCTaskNode::sendRequest(bool req) {
@@ -200,12 +226,12 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
     boost::split(_param_split, tmp_edge, boost::is_any_of(","));
     first_pose_ = {std::stod(_param_split[0]), std::stod(_param_split[1])};
 
-    while (!client_->wait_for_service(1s)) {
-    if (!rclcpp::ok()) {
-        RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
-    }
-    RCLCPP_INFO(LOGGER, "service not available, waiting again...");
-    }
+    // while (!client_->wait_for_service(1s)) {
+    // if (!rclcpp::ok()) {
+    //     RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
+    // }
+    // RCLCPP_INFO(LOGGER, "service not available, waiting again...");
+    // }
 }
 
 rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseInterface() {
@@ -281,9 +307,9 @@ void MTCTaskNode::setupPlanner() {
     oc.orientation.z = 0.0;
     oc.orientation.w = 0.0;
 
-    oc.absolute_x_axis_tolerance = 0.35;
-    oc.absolute_y_axis_tolerance = 0.35;
-    oc.absolute_z_axis_tolerance = 2.53;  // free rotation around tool axis
+    oc.absolute_x_axis_tolerance = 0.785;
+    oc.absolute_y_axis_tolerance = 0.785;
+    oc.absolute_z_axis_tolerance = M_PI;  // free rotation around tool axis
 
     oc.weight = 1.0;
 
@@ -292,12 +318,10 @@ void MTCTaskNode::setupPlanner() {
     auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
     task_planner->setMaxVelocityScalingFactor(0.2);
     task_planner->setMaxAccelerationScalingFactor(0.2);
-    task_planner->setTimeout(10.0);
 
     auto rrtstar_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
     rrtstar_planner->setMaxVelocityScalingFactor(0.2);
     rrtstar_planner->setMaxAccelerationScalingFactor(0.2);
-    rrtstar_planner->setTimeout(10.0);
     rrtstar_planner->setPlannerId("RRTstarkConfigDefault");
 
     auto rrtconnect_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
@@ -315,7 +339,7 @@ void MTCTaskNode::setupPlanner() {
     // multipipeline_planner_->push_back(lin_planner);
     multipipeline_planner_->push_back(task_planner);
     multipipeline_planner_->push_back(rrtstar_planner);
-    multipipeline_planner_->push_back(rrtconnect_planner);
+    // multipipeline_planner_->push_back(rrtconnect_planner);
 
     interpolation_planner_ = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
 
@@ -361,7 +385,7 @@ std::function<bool(const mtc::SolutionBase&, std::string&)> MTCTaskNode::makeCle
         collision_detection::DistanceResult res;
         scene->getCollisionEnv()->distanceRobot(req, res, state);
 
-        const double min_dist = 0.00;
+        const double min_dist = 0.02;
         if (res.minimum_distance.distance < min_dist)
             return false;
 
@@ -398,6 +422,10 @@ void MTCTaskNode::addCurrentStage() {
 }
 
 void MTCTaskNode::createPickTask(std::string& object_name) {
+    RCLCPP_ERROR(LOGGER, "current ptr : %s", current_state_ptr_->name().c_str());
+    RCLCPP_ERROR(LOGGER, "hand : %s", hand_frame_.c_str());
+    RCLCPP_ERROR(LOGGER, "obj : %s", object_name.c_str());
+
     task_.setRobotModel(model_);
 
     task_.setProperty("group", arm_group_name_);
@@ -429,8 +457,8 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
             "CONNECT",
             mtc::stages::Connect::GroupPlannerVector{{arm_group_name_, multipipeline_planner_}});
         stage->properties().configureInitFrom(mtc::Stage::PARENT);
-
-        // stage->setPathConstraints(constraints_);
+        stage->setTimeout(10.0);
+        stage->setPathConstraints(constraints_);
 
         auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2pick", std::move(stage));
         wrapper->setPredicate(clearance_predicate);
@@ -450,10 +478,8 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
         };
 
         std::vector<Approach> approaches = {
-            {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max_,
-            0.0},
-            {"pickBelow", Eigen::AngleAxisd(2 * M_PI, Eigen::Vector3d::UnitX()),
-            z_ / 2 - hand_max_, 0.0},
+            {"pickAbove", Eigen::AngleAxisd(M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max_, 0.0},
+            {"pickBelow", Eigen::AngleAxisd(2 * M_PI, Eigen::Vector3d::UnitX()), z_ / 2 - hand_max_, 0.0},
         };
 
         for (const auto& approach : approaches) {
@@ -466,13 +492,10 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
             stage->properties().set("marker_ns", "grasp");
             stage->setPreGraspPose("open");
             stage->setObject(object_name);
-            if (type_ == SHAPE::BOX)
-                stage->setAngleDelta(M_PI / 2);
-            else if (type_ == SHAPE::CYLINDER)
-                stage->setAngleDelta(M_PI / 12);
+            stage->setAngleDelta(M_PI / 12);
             stage->setMonitoredStage(current_state_ptr_);
 
-            Eigen::Isometry3d grasp_frame_transform;
+            Eigen::Isometry3d grasp_frame_transform = Eigen::Isometry3d::Identity();
             grasp_frame_transform.linear() = approach.rot.matrix();
             grasp_frame_transform.translation().z() = approach.z_offset;
             grasp_frame_transform.translation().x() = approach.x_offset;
@@ -485,8 +508,7 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
             wrapper->properties().configureInitFrom(mtc::Stage::INTERFACE, {"target_pose"});
 
             {
-                auto approach_stage =
-                    std::make_unique<mtc::stages::MoveRelative>("approach", cartesian_planner_);
+                auto approach_stage = std::make_unique<mtc::stages::MoveRelative>("approach", cartesian_planner_);
                 approach_stage->properties().set("marker_ns", "approach");
                 approach_stage->properties().set("link", hand_frame_);
                 approach_stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
@@ -612,7 +634,8 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
             "CONNECT",
             mtc::stages::Connect::GroupPlannerVector{{arm_group_name_, multipipeline_planner_}});
         stage_move_to_place->properties().configureInitFrom(mtc::Stage::PARENT);
-        // stage_move_to_place->setPathConstraints(constraints_);
+        stage_move_to_place->setTimeout(10.0);
+        stage_move_to_place->setPathConstraints(constraints_);
 
         auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2place",
                                                                     std::move(stage_move_to_place));
@@ -793,8 +816,12 @@ Eigen::Vector3d getPosition(geometry_msgs::msg::Pose p) {
 
 void MTCTaskNode::checkObjectPosition() {
     /**
-     * Add Prtoection
+     * Add Prtoection - if no object_pose_
      */
+    Eigen::Vector3d tmp_position(object_pose_.position.x, object_pose_.position.y, object_pose_.position.z);
+    if (tmp_position == Eigen::Vector3d::Zero())
+        return;
+
     if (!grasped_) {
         std::vector<std::string> names{current_obj_};
         moveit::planning_interface::PlanningSceneInterface psi;
@@ -810,7 +837,7 @@ void MTCTaskNode::checkObjectPosition() {
             Eigen::Vector3d current_position = getPosition(current_pose);
 
             double distance = (old_position - current_position).norm();
-            RCLCPP_WARN(LOGGER, "Distance : %f", distance);
+            // RCLCPP_WARN(LOGGER, "Distance : %f", distance);
 
             if (distance > threshold_ && !moved_) {
                 RCLCPP_WARN(LOGGER, "Object Position deviates too much");
@@ -865,9 +892,6 @@ bool MTCTaskNode::executeTask() {
 }
 
 bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamped& place) {
-    rclcpp::sleep_for(std::chrono::milliseconds(2000));
-    setupObjectPose(object_name);
-    RCLCPP_WARN(LOGGER, "Setup Pose");
     // task_ = mtc::Task();
     task_.clear();
 
@@ -896,6 +920,7 @@ bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamp
         if (moved_)
         {
             RCLCPP_WARN(LOGGER, "Object Moved");
+            rclcpp::sleep_for(std::chrono::milliseconds(2000));
             setupObjectPose(object_name);
             moved_ = false;
             return true;
@@ -910,21 +935,22 @@ bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamp
     task_.introspection().publishSolution(*task_.solutions().front());
 
     RCLCPP_WARN(LOGGER, "Execute");
-    if (!executeTask()) {
-        if (moved_) {
-            RCLCPP_WARN(LOGGER, "Object Moved");
-            setupObjectPose(object_name);
-            moved_ = false;
-            return true;
-        } else if (recovery_done_ < recovery_allowed_) {
-            ++recovery_done_;
-            RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);
-            return true;
-        } else {
-            RCLCPP_ERROR(LOGGER, "No more recovery possible");
-            return false;
-        }
-    }
+    // if (!executeTask()) {
+    //     if (moved_) {
+    //         RCLCPP_WARN(LOGGER, "Object Moved");
+    //         rclcpp::sleep_for(std::chrono::milliseconds(2000));
+    //         setupObjectPose(object_name);
+    //         moved_ = false;
+    //         return true;
+    //     } else if (recovery_done_ < recovery_allowed_) {
+    //         ++recovery_done_;
+    //         RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);
+    //         return true;
+    //     } else {
+    //         RCLCPP_ERROR(LOGGER, "No more recovery possible");
+    //         return false;
+    //     }
+    // }
 
     RCLCPP_INFO(LOGGER, "Execution done");
     return false;
@@ -986,7 +1012,7 @@ void MTCTaskNode::palette()
         RCLCPP_WARN(LOGGER, "Next Object");
     }
 
-    returnHome();
+    // returnHome();
     RCLCPP_WARN(LOGGER, "Palette Finish");
 }
 
@@ -1005,12 +1031,12 @@ int main(int argc, char** argv) {
         executor.remove_node(mtc_task_node->getNodeBaseInterface());
     });
 
-    // mtc_task_node->setupPlanningScene();
-    mtc_task_node->setupPlanner();
-    mtc_task_node->palette();
+    mtc_task_node->setupPlanningScene();
+    // mtc_task_node->setupPlanner();
+    // mtc_task_node->palette();
 
     RCLCPP_INFO(LOGGER, "STOP");
-    rclcpp::shutdown();
     spin_thread->join();
+    rclcpp::shutdown();
     return 0;
 }

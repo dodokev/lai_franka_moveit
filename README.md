@@ -17,6 +17,24 @@ Moreover the rs.launch.py file and the self_filter.launch.py file won't be usabl
 # Console command to use the package (Considering the optional packages are installed)
 ## Perception
 
+To use the perception pipeline, you can run this launch file.
+```
+ros2 launch franka_moveit perception.launch.py robot_description:="$(xacro /{path}/{robot_name}.urdf.xacro)"
+```
+
+For the plug ang play purpose.
+```
+ros2 launch franka_moveit perception.launch.py robot_description:="$(xacro /home/labrob/franka_ros2_ws/src/franka_description/robots/fr3/fr3_filter.urdf.xacro)"
+```
+
+---
+
+The camera is launch like this
+```
+ros2 launch rs.launch.py
+```
+
+---
 
 The robot self filter requires the robot urdf and the parameters (scale, padding) of the collision geometries.
 ```
@@ -24,9 +42,6 @@ ros2 launch franka_moveit self_filter.launch.py robot_description:="$(xacro /{pa
 ```
 
 The parameters can be modified in the franka_moveit_config/config/robot_filter.yaml. It is useful only if your robot urdf has simple shape as collision geometry (Sphere, Cylinder, Box). If you use meshes as collision geometry then the padding and scale doesn't work.
-
-
-ros2 launch franka_moveit perception.launch.py robot_description:="$(xacro /home/labrob/franka_ros2_ws/src/franka_description/robots/fr3/fr3_filter.urdf.xacro)"
 
 ---
 
@@ -65,12 +80,6 @@ ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.206,0.034'}"
 // -- BOX : [longest,..,shortest]
 ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.255,0.153,0.112'}"
 ```
-
-To launch the perception pipeline you will need to launch the self filter launch file and the rs.launch.py
-```
-ros2 launch franka_moveit rs.launch.py
-```
-This launch file regroups everything needed to run the camera and the April Tag detection. Plus the two nodes for object detection and removal. 
 
 ## MoveIt2
 
