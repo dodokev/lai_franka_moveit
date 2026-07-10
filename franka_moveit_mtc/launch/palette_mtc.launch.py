@@ -144,12 +144,14 @@ def generate_launch_description():
     first_pose = LaunchConfiguration("first_pose")
     rotation = LaunchConfiguration("rotation")
     offset = LaunchConfiguration("offset")
+    recovery = LaunchConfiguration("recovery")
     
     nb_obj_arg = DeclareLaunchArgument("nb_obj")
     slot_arg = DeclareLaunchArgument("slot")
     first_pose_arg = DeclareLaunchArgument("first_pose")
     rot_arg = DeclareLaunchArgument("rotation", default_value="0.0")
     offset_arg = DeclareLaunchArgument("offset", default_value="0.0")
+    recovery_arg = DeclareLaunchArgument("recovery", default_value="0")
 
     package = "franka_moveit_mtc"
     package_shared_path = get_package_share_directory(package)
@@ -172,6 +174,7 @@ def generate_launch_description():
                 "first_pose": first_pose,
                 "rotation": rotation,
                 "offset": offset,
+                "recovery": recovery
             },
         ],
         emulate_tty=True,
@@ -191,5 +194,6 @@ def generate_launch_description():
         first_pose_arg,
         rot_arg,
         offset_arg,
-
+        recovery_arg,
+        
         node])

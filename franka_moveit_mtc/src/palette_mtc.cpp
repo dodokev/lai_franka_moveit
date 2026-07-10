@@ -95,8 +95,8 @@ private:
     std::string hand_frame_;
 
     std::string stage_failed_{""};
-    unsigned int recovery_allowed_{2};
-    unsigned int recovery_done_{0};
+    int recovery_allowed_;
+    int recovery_done_{0};
 
     // -- Object
     SHAPE type_{SHAPE::NONE};
@@ -138,11 +138,11 @@ void MTCTaskNode::setupPlanningScene() {
     geometry_msgs::msg::Pose pose;
     pose.orientation.w = 1.0;
 
-    pose.position.x = 0.3;
-    pose.position.z = 0.185;
-    // pose.position.x = 0.5;
-    // pose.position.y = -0.25;
-    // pose.position.z = obj_msg.primitives[0].dimensions[0]/2 + voxel_size_/2;
+    // pose.position.x = 0.3;
+    // pose.position.z = 0.185;
+    pose.position.x = 0.5;
+    pose.position.y = -0.25;
+    pose.position.z = obj_msg.primitives[0].dimensions[0]/2 + voxel_size_/2;
 
     // 9.5x6
     obj_msg.primitive_poses.resize(1);
@@ -151,32 +151,32 @@ void MTCTaskNode::setupPlanningScene() {
 
     obj_msg_2.id = "object1";
     pose.position.x = 0.35;
-    pose.position.y = 0.1;
+    pose.position.y = 0.35;
 
-    // 14.5x3
+    // 19.25x3
     // obj_msg_2.primitive_poses.resize(1);
     // obj_msg_2.primitive_poses[0] = pose;
     // psi.applyCollisionObject(obj_msg_2);
 
-    task_.setRobotModel(model_);
+    // task_.setRobotModel(model_);
 
-    task_.setProperty("group", arm_group_name_);
-    task_.setProperty("eef", hand_group_name_);
-    task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
+    // task_.setProperty("group", arm_group_name_);
+    // task_.setProperty("eef", hand_group_name_);
+    // task_.setProperty("ik_frame", hand_frame_);
+    // task_.setProperty("path_constraints", constraints_);
 
-    auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
-    task_.add(std::move(stage_state_current));
+    // auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
+    // task_.add(std::move(stage_state_current));
 
-    auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
-    stage->attachObject("object0", hand_frame_);
-    task_.add(std::move(stage));
+    // auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
+    // stage->attachObject("object0", hand_frame_);
+    // task_.add(std::move(stage));
 
-    task_.init();
-    task_.plan(1);
+    // task_.init();
+    // task_.plan(1);
 
-    auto solution = task_.solutions().front();
-    auto result = task_.execute(*solution);
+    // auto solution = task_.solutions().front();
+    // auto result = task_.execute(*solution);
 }
 
 bool MTCTaskNode::sendRequest(bool req) {
@@ -219,6 +219,7 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
     std::string tmp_edge = node_->get_parameter("first_pose").as_string();
     rotation_ = node_->get_parameter("rotation").as_double();
     offset_ = node_->get_parameter("offset").as_double();
+    recovery_allowed_ = node_->get_parameter("recovery").as_int();
 
     std::vector<std::string> _param_split;
     boost::split(_param_split, tmp_slot, boost::is_any_of(","));
@@ -226,12 +227,12 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
     boost::split(_param_split, tmp_edge, boost::is_any_of(","));
     first_pose_ = {std::stod(_param_split[0]), std::stod(_param_split[1])};
 
-    // while (!client_->wait_for_service(1s)) {
-    // if (!rclcpp::ok()) {
-    //     RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
-    // }
-    // RCLCPP_INFO(LOGGER, "service not available, waiting again...");
-    // }
+    while (!client_->wait_for_service(1s)) {
+    if (!rclcpp::ok()) {
+        RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
+    }
+    RCLCPP_INFO(LOGGER, "service not available, waiting again...");
+    }
 }
 
 rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseInterface() {
@@ -316,30 +317,30 @@ void MTCTaskNode::setupPlanner() {
     constraints_.orientation_constraints.push_back(oc);
 
     auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
-    task_planner->setMaxVelocityScalingFactor(0.2);
-    task_planner->setMaxAccelerationScalingFactor(0.2);
+    task_planner->setMaxVelocityScalingFactor(0.1);
+    task_planner->setMaxAccelerationScalingFactor(0.1);
 
     auto rrtstar_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
-    rrtstar_planner->setMaxVelocityScalingFactor(0.2);
-    rrtstar_planner->setMaxAccelerationScalingFactor(0.2);
+    rrtstar_planner->setMaxVelocityScalingFactor(0.1);
+    rrtstar_planner->setMaxAccelerationScalingFactor(0.1);
     rrtstar_planner->setPlannerId("RRTstarkConfigDefault");
 
     auto rrtconnect_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
-    rrtconnect_planner->setMaxVelocityScalingFactor(0.2);
-    rrtconnect_planner->setMaxAccelerationScalingFactor(0.2);
+    rrtconnect_planner->setMaxVelocityScalingFactor(0.1);
+    rrtconnect_planner->setMaxAccelerationScalingFactor(0.1);
     rrtconnect_planner->setPlannerId("RRTConnectkConfigDefault");
 
     auto lin_planner =
         std::make_shared<mtc::solvers::PipelinePlanner>(node_, "pilz_industrial_motion_planner");
-    lin_planner->setMaxVelocityScalingFactor(0.2);
-    lin_planner->setMaxAccelerationScalingFactor(0.2);
+    lin_planner->setMaxVelocityScalingFactor(0.1);
+    lin_planner->setMaxAccelerationScalingFactor(0.1);
     lin_planner->setPlannerId("LIN");
 
     multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
     // multipipeline_planner_->push_back(lin_planner);
     multipipeline_planner_->push_back(task_planner);
+    multipipeline_planner_->push_back(rrtconnect_planner);
     multipipeline_planner_->push_back(rrtstar_planner);
-    // multipipeline_planner_->push_back(rrtconnect_planner);
 
     interpolation_planner_ = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
 
@@ -564,7 +565,7 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
                 approach_stage->properties().set("marker_ns", "approach");
                 approach_stage->properties().set("link", hand_frame_);
                 approach_stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-                approach_stage->setMinMaxDistance(0.1, 0.15);
+                approach_stage->setMinMaxDistance(0.15, 0.15);
 
                 geometry_msgs::msg::Vector3Stamped vec;
                 vec.header.frame_id = hand_frame_;
@@ -651,7 +652,7 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
         {
             auto stage = std::make_unique<mtc::stages::MoveRelative>("place", cartesian_planner_);
             stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-            stage->setMinMaxDistance(0.05, 0.15);
+            stage->setMinMaxDistance(0.15, 0.15);
             stage->setIKFrame(hand_frame_);
             stage->properties().set("marker_ns", "place");
 
@@ -800,10 +801,10 @@ void MTCTaskNode::fillTask(std::string& object_name, geometry_msgs::msg::PoseSta
     if (stage_failed_ == "PickTask" || stage_failed_ == "pickObject" || stage_failed_ == "") {
         grasped_ = false;
         createPickTask(object_name);
-        addLiftStage(0.05, 0.15);
+        addLiftStage(0.15, 0.15);
         createPlaceTask(object_name, attach_stage_ptr_, place);
     } else if (stage_failed_ == "liftObject") {
-        addLiftStage(0.05, 0.15);
+        addLiftStage(0.15, 0.15);
         createPlaceTask(object_name, current_state_ptr_, place);
     } else if (stage_failed_ == "PlaceTask") {
         createPlaceTask(object_name, current_state_ptr_, place);
@@ -1032,8 +1033,11 @@ int main(int argc, char** argv) {
     });
 
     mtc_task_node->setupPlanningScene();
-    // mtc_task_node->setupPlanner();
-    // mtc_task_node->palette();
+    mtc_task_node->setupPlanner();
+    
+    // If object setup through code
+    rclcpp::sleep_for(std::chrono::milliseconds(2000));
+    mtc_task_node->palette();
 
     RCLCPP_INFO(LOGGER, "STOP");
     spin_thread->join();

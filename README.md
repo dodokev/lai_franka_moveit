@@ -171,15 +171,15 @@ It is a single time pick and place program that allows to check if the object is
 
 Another file allows to put objects on a pallet.
 ```
-ros2 launch franka_moveit_mtc palette_mtc.launch.py robot_ip:=IP use_fake_hardware:={true|false} nb_obj:=NB slot:="ROW,COLUMN" first_pose:="X,Y" rotation:=RADIAN offset:=VALUE
+ros2 launch franka_moveit_mtc palette_mtc.launch.py robot_ip:=IP use_fake_hardware:={true|false} nb_obj:=NB slot:="ROW,COLUMN" first_pose:="X,Y" rotation:=RADIAN offset:=VALUE recovery:=NB
 ```
 
-You can put the number of objects you have, how many rows and columns, where does the first object is put, and the rotation of the pallet frame from the world frame.
+You can put the number of objects you have, how many rows and columns, where does the first object is put, and the rotation of the pallet frame from the world frame. You can add a number of recovery path if the execution failed, 0 recovery means no recovery.
 ```
 // -- Example
 ros2 launch franka_moveit_mtc palette_mtc.launch.py robot_ip:=172.16.0.2 nb_obj:=3 slot:="2,2" first_pose:="0.5,0" rotation:=0.785 offset:=0.05
 ```
-This example is launch on the real robot, and will execute a pick an place task on 3 objects. They will be ordered as a pack of 2 by 2. The first object is placed at x = 0.5 and y = 0. The others objects are placed next to each others into a frame rotated of 0.785 radians with an safety distance of 0.05 m.
+This example is launch on the real robot, and will execute a pick an place task on 3 objects. They will be ordered as a pack of 2 by 2. The first object is placed at x = 0.5 and y = 0. The others objects are placed next to each others into a frame rotated of 0.785 radians with an safety distance of 0.05 m. And no recovery path when failed.
 
 On the default rotation (rotation:=0.0 or no rotation argument), the columns are along the y-axis and the rows with the x-axis.
 

@@ -470,6 +470,8 @@ bool TaskPlanningContext::checkSegment(
   moveit::core::RobotState probe = seed_state;
   min_clearance = std::numeric_limits<double>::max();
 
+  // RCLCPP_INFO(LOGGER, "Anothrt");
+
   for (int s = 1; s <= SEGMENT_SUBDIVISIONS; ++s)
   {
     const double t = static_cast<double>(s) / SEGMENT_SUBDIVISIONS;
@@ -487,20 +489,36 @@ bool TaskPlanningContext::checkSegment(
     if (!need_distance)
       continue;
 
+    std::vector<moveit_msgs::msg::AttachedCollisionObject> all_attached;
+    collision_detection::AllowedCollisionMatrix copy = planning_scene_->getAllowedCollisionMatrix();
+    planning_scene_->getAttachedCollisionObjectMsgs(all_attached);
+    for (const auto& att : all_attached)
+    {
+      copy.setEntry(att.object.id, att.object.id, true);
+      const auto* body = probe.getAttachedBody(att.object.id);
+      const auto& tfs = body->getGlobalCollisionBodyTransforms();
+  
+      for (size_t i = 0; i < tfs.size(); ++i)
+      {
+        RCLCPP_WARN_STREAM(LOGGER, "Position" << tfs[i].translation());
+      }
+  
+      auto ee_tf = probe.getGlobalLinkTransform("fr3_hand_tcp");
+      RCLCPP_WARN(LOGGER, "EE : %f", ee_tf.translation().z());
+    }
+
+   
+    collision_detection::DistanceRequest d_req_copy = d_req_cache_;
+    d_req_copy.type = collision_detection::DistanceRequestType::ALL;
+    
     collision_detection::DistanceResult d_res;
-    planning_scene_->getCollisionEnv()->distanceRobot(d_req_cache_, d_res, probe);
+    planning_scene_->getCollisionEnv()->distanceRobot(d_req_copy, d_res, probe);
     const double d = d_res.minimum_distance.distance;
 
-    collision_detection::DistanceRequest req;
-    req.type = collision_detection::DistanceRequestType::SINGLE;
-
-    collision_detection::DistanceResult res;
-    planning_scene_->getCollisionEnv()->distanceRobot(req, res, probe);
-
-    RCLCPP_ERROR(LOGGER, "NEXT : %f", d);
-    for (const auto& [pair, data] : res.distances)
-      RCLCPP_WARN(LOGGER, "Pair : %s | %s | %f", pair.first.c_str(), pair.second.c_str(), data[0].distance);
-
+    if (min_clearance != std::numeric_limits<double>::max())
+      RCLCPP_ERROR(LOGGER, "NEXT : %f", d);
+    for (const auto& [pair, data] : d_res.distances)
+      RCLCPP_WARN(LOGGER, "Pair : %s | %s | %f", pair.first.c_str(), pair.second.c_str(), data[0].distance); 
 
     if (d <= 0.0)
       return false;   // in collision

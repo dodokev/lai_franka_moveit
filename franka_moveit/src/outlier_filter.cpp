@@ -30,9 +30,9 @@ OutlierFilter::OutlierFilter()
 
     vg_.setLeafSize(voxel_size, voxel_size, voxel_size); // TUNE
 
-    ec_.setClusterTolerance(0.025); // TUNE
+    ec_.setClusterTolerance(0.035); // TUNE
 
-    min_keep_size_ = 50; // TUNE
+    min_keep_size_ = 25; // TUNE
     ec_.setMinClusterSize(min_keep_size_);
 }
 

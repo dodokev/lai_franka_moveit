@@ -73,8 +73,8 @@ self_filter:
 
       fr3_link7:
         cylinder_scale: [0.5, 1.6]
-        cylinder_padding: [0.01, 0.01]
+        cylinder_padding: [0.02, 0.02]
 
       fr3_hand:
         box_scale: [0.6, 2.0, 1.8]
-        box_padding: [0.01, 0.03, 0.01]
+        box_padding: [0.03, 0.03, 0.02]
