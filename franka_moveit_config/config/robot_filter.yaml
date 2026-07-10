@@ -77,4 +77,4 @@ self_filter:
 
       fr3_hand:
         box_scale: [0.6, 2.0, 1.8]
-        box_padding: [0.03, 0.03, 0.02]
+        box_padding: [0.03, 0.03, 0.04]

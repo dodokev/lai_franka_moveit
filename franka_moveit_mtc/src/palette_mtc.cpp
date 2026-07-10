@@ -33,10 +33,6 @@ static const rclcpp::Logger LOGGER = rclcpp::get_logger("mtc_tutorial");
 namespace mtc = moveit::task_constructor;
 using namespace std::chrono_literals;
 
-/**
- * FIND THE FUCKING SEGEMTATIONFAULT, WHY !
- */
-
 class MTCTaskNode {
 public:
     enum class SHAPE { NONE, SPHERE, CYLINDER, BOX };
@@ -138,8 +134,6 @@ void MTCTaskNode::setupPlanningScene() {
     geometry_msgs::msg::Pose pose;
     pose.orientation.w = 1.0;
 
-    // pose.position.x = 0.3;
-    // pose.position.z = 0.185;
     pose.position.x = 0.5;
     pose.position.y = -0.25;
     pose.position.z = obj_msg.primitives[0].dimensions[0]/2 + voxel_size_/2;
@@ -154,9 +148,9 @@ void MTCTaskNode::setupPlanningScene() {
     pose.position.y = 0.35;
 
     // 19.25x3
-    // obj_msg_2.primitive_poses.resize(1);
-    // obj_msg_2.primitive_poses[0] = pose;
-    // psi.applyCollisionObject(obj_msg_2);
+    obj_msg_2.primitive_poses.resize(1);
+    obj_msg_2.primitive_poses[0] = pose;
+    psi.applyCollisionObject(obj_msg_2);
 
     // task_.setRobotModel(model_);
 
@@ -330,17 +324,15 @@ void MTCTaskNode::setupPlanner() {
     rrtconnect_planner->setMaxAccelerationScalingFactor(0.1);
     rrtconnect_planner->setPlannerId("RRTConnectkConfigDefault");
 
-    auto lin_planner =
-        std::make_shared<mtc::solvers::PipelinePlanner>(node_, "pilz_industrial_motion_planner");
+    auto lin_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "pilz_industrial_motion_planner");
     lin_planner->setMaxVelocityScalingFactor(0.1);
     lin_planner->setMaxAccelerationScalingFactor(0.1);
     lin_planner->setPlannerId("LIN");
 
     multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
-    // multipipeline_planner_->push_back(lin_planner);
     multipipeline_planner_->push_back(task_planner);
     multipipeline_planner_->push_back(rrtconnect_planner);
-    multipipeline_planner_->push_back(rrtstar_planner);
+    // multipipeline_planner_->push_back(rrtstar_planner);
 
     interpolation_planner_ = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
 
@@ -513,7 +505,7 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
                 approach_stage->properties().set("marker_ns", "approach");
                 approach_stage->properties().set("link", hand_frame_);
                 approach_stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-                approach_stage->setMinMaxDistance(0.1, 0.15);
+                approach_stage->setMinMaxDistance(0.05, 0.15);
 
                 geometry_msgs::msg::Vector3Stamped vec;
                 vec.header.frame_id = hand_frame_;
@@ -652,7 +644,7 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
         {
             auto stage = std::make_unique<mtc::stages::MoveRelative>("place", cartesian_planner_);
             stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-            stage->setMinMaxDistance(0.15, 0.15);
+            stage->setMinMaxDistance(0.05, 0.15);
             stage->setIKFrame(hand_frame_);
             stage->properties().set("marker_ns", "place");
 
@@ -718,7 +710,7 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
     {
         auto stage = std::make_unique<mtc::stages::MoveRelative>("retreat", cartesian_planner_);
         stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-        stage->setMinMaxDistance(0.1, 0.15);
+        stage->setMinMaxDistance(0.05, 0.15);
         stage->setIKFrame(hand_frame_);
         stage->properties().set("marker_ns", "retreat");
 
@@ -801,10 +793,10 @@ void MTCTaskNode::fillTask(std::string& object_name, geometry_msgs::msg::PoseSta
     if (stage_failed_ == "PickTask" || stage_failed_ == "pickObject" || stage_failed_ == "") {
         grasped_ = false;
         createPickTask(object_name);
-        addLiftStage(0.15, 0.15);
+        addLiftStage(0.05, 0.15);
         createPlaceTask(object_name, attach_stage_ptr_, place);
     } else if (stage_failed_ == "liftObject") {
-        addLiftStage(0.15, 0.15);
+        addLiftStage(0.05, 0.15);
         createPlaceTask(object_name, current_state_ptr_, place);
     } else if (stage_failed_ == "PlaceTask") {
         createPlaceTask(object_name, current_state_ptr_, place);
@@ -936,22 +928,22 @@ bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamp
     task_.introspection().publishSolution(*task_.solutions().front());
 
     RCLCPP_WARN(LOGGER, "Execute");
-    // if (!executeTask()) {
-    //     if (moved_) {
-    //         RCLCPP_WARN(LOGGER, "Object Moved");
-    //         rclcpp::sleep_for(std::chrono::milliseconds(2000));
-    //         setupObjectPose(object_name);
-    //         moved_ = false;
-    //         return true;
-    //     } else if (recovery_done_ < recovery_allowed_) {
-    //         ++recovery_done_;
-    //         RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);
-    //         return true;
-    //     } else {
-    //         RCLCPP_ERROR(LOGGER, "No more recovery possible");
-    //         return false;
-    //     }
-    // }
+    if (!executeTask()) {
+        if (moved_) {
+            RCLCPP_WARN(LOGGER, "Object Moved");
+            rclcpp::sleep_for(std::chrono::milliseconds(2000));
+            setupObjectPose(object_name);
+            moved_ = false;
+            return true;
+        } else if (recovery_done_ < recovery_allowed_) {
+            ++recovery_done_;
+            RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);
+            return true;
+        } else {
+            RCLCPP_ERROR(LOGGER, "No more recovery possible");
+            return false;
+        }
+    }
 
     RCLCPP_INFO(LOGGER, "Execution done");
     return false;
@@ -1013,7 +1005,7 @@ void MTCTaskNode::palette()
         RCLCPP_WARN(LOGGER, "Next Object");
     }
 
-    // returnHome();
+    returnHome();
     RCLCPP_WARN(LOGGER, "Palette Finish");
 }
 

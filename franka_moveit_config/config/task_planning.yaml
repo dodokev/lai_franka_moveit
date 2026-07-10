@@ -14,7 +14,4 @@ config:
   step_size: 0.05
   goal_bias: 0.1
   goal_tolerance: 0.02
-  clearance: 0.05
-  smooth_iter: 8
-  smooth_step: 0.02
-  smooth_clearance_weigth: 0.7
+  clearance: 0.02

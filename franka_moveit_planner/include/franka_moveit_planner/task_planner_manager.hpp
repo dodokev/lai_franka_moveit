@@ -42,10 +42,6 @@ private:
   double goal_bias_;
   double goal_tolerance_;
   double clearance_;
-
-  int smooth_iterations_;
-  double smooth_step_size_;
-  double smooth_clearance_weight_;
 };
 
 }  // namespace task_planner

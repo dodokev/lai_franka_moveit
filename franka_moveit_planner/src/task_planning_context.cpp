@@ -470,8 +470,6 @@ bool TaskPlanningContext::checkSegment(
   moveit::core::RobotState probe = seed_state;
   min_clearance = std::numeric_limits<double>::max();
 
-  // RCLCPP_INFO(LOGGER, "Anothrt");
-
   for (int s = 1; s <= SEGMENT_SUBDIVISIONS; ++s)
   {
     const double t = static_cast<double>(s) / SEGMENT_SUBDIVISIONS;
@@ -495,30 +493,31 @@ bool TaskPlanningContext::checkSegment(
     for (const auto& att : all_attached)
     {
       copy.setEntry(att.object.id, att.object.id, true);
-      const auto* body = probe.getAttachedBody(att.object.id);
-      const auto& tfs = body->getGlobalCollisionBodyTransforms();
+      // const auto* body = probe.getAttachedBody(att.object.id);
+      // const auto& tfs = body->getGlobalCollisionBodyTransforms();
   
-      for (size_t i = 0; i < tfs.size(); ++i)
-      {
-        RCLCPP_WARN_STREAM(LOGGER, "Position" << tfs[i].translation());
-      }
+      // for (size_t i = 0; i < tfs.size(); ++i)
+      // {
+      //   RCLCPP_WARN_STREAM(LOGGER, "Position" << tfs[i].translation());
+      // }
   
-      auto ee_tf = probe.getGlobalLinkTransform("fr3_hand_tcp");
-      RCLCPP_WARN(LOGGER, "EE : %f", ee_tf.translation().z());
+      // auto ee_tf = probe.getGlobalLinkTransform("fr3_hand_tcp");
+      // RCLCPP_WARN(LOGGER, "EE : %f", ee_tf.translation().z());
     }
 
    
     collision_detection::DistanceRequest d_req_copy = d_req_cache_;
-    d_req_copy.type = collision_detection::DistanceRequestType::ALL;
+    d_req_copy.acm = &copy;
+    // d_req_copy.type = collision_detection::DistanceRequestType::ALL;
     
     collision_detection::DistanceResult d_res;
     planning_scene_->getCollisionEnv()->distanceRobot(d_req_copy, d_res, probe);
     const double d = d_res.minimum_distance.distance;
 
-    if (min_clearance != std::numeric_limits<double>::max())
-      RCLCPP_ERROR(LOGGER, "NEXT : %f", d);
-    for (const auto& [pair, data] : d_res.distances)
-      RCLCPP_WARN(LOGGER, "Pair : %s | %s | %f", pair.first.c_str(), pair.second.c_str(), data[0].distance); 
+    // if (min_clearance != std::numeric_limits<double>::max())
+    //   RCLCPP_ERROR(LOGGER, "NEXT : %f", d);
+    // for (const auto& [pair, data] : d_res.distances)
+    //   RCLCPP_WARN(LOGGER, "Pair : %s | %s | %f", pair.first.c_str(), pair.second.c_str(), data[0].distance); 
 
     if (d <= 0.0)
       return false;   // in collision
@@ -600,8 +599,7 @@ std::vector<Eigen::Vector3d> TaskPlanningContext::smoothPath(
     const std::vector<Eigen::Vector3d>& path,
     const moveit::core::RobotState&     seed) const
 {
-  auto after_shortcut = shortcutPath(path, seed);
-  return nudgeClearance(after_shortcut, seed);
+  return shortcutPath(path, seed);
 }
 
 // ------------------------------------------------------------
@@ -618,125 +616,17 @@ std::vector<Eigen::Vector3d> TaskPlanningContext::shortcutPath(
   result.push_back(path.front());
 
   std::size_t i = 0;
+  double unused{0};
   while (i < path.size() - 1)
   {
     std::size_t j = path.size() - 1;
-    while (j > i + 1 && !isSegmentCollisionFree(path[i], path[j], seed))
+    // while (j > i + 1 && !isSegmentCollisionFree(path[i], path[j], seed))
+    while (j > i + 1 && !collisionDistance(path[i], path[j], seed, unused))
       --j;
     result.push_back(path[j]);
     i = j;
   }
   return result;
-}
-
-// ------------------------------------------------------------
-// Pass 2: clearance gradient nudge
-//
-// For each interior waypoint w_i we approximate the clearance gradient
-// using six-point finite differences along ±x, ±y, ±z, then take a step
-// in the gradient direction scaled by SMOOTH_NUDGE_STEP.
-//
-// A move is accepted only when it:
-//   (a) keeps clearance ≥ RRT_CLEARANCE, and
-//   (b) reduces the cost   C = (1-W)*length - W*clearance
-//       (negative clearance term because we want to maximise it)
-//
-// Start and goal are pinned — they are never moved.
-// ------------------------------------------------------------
-std::vector<Eigen::Vector3d> TaskPlanningContext::nudgeClearance(
-    const std::vector<Eigen::Vector3d>& path,
-    const moveit::core::RobotState&     seed) const
-{
-  if (path.size() <= 2 || SMOOTH_NUDGE_ITERS <= 0)
-    return path;
-
-  std::vector<Eigen::Vector3d> wp = path;   // working copy
-  const std::size_t N = wp.size();
-
-  // Helper: path cost = (1-W)*total_length - W*sum_clearance
-  //   Lower is better (we minimise).
-  auto segmentCost = [&](const Eigen::Vector3d& a,
-                          const Eigen::Vector3d& b,
-                          double clr_a, double clr_b) -> double
-  {
-    const double len = (b - a).norm();
-    const double clr = 0.5 * (clr_a + clr_b);   // average clearance over segment
-    return (1.0 - SMOOTH_CLEARANCE_W) * len
-           - SMOOTH_CLEARANCE_W * clr;
-  };
-
-  // Cache clearance for each waypoint (skip i=0 and i=N-1, they won't move).
-  std::vector<double> clr(N, 0.0);
-  for (std::size_t i = 1; i + 1 < N; ++i)
-    clr[i] = pointClearance(wp[i], seed);   // may be -1 on IK fail → treated as 0
-
-  for (int iter = 0; iter < SMOOTH_NUDGE_ITERS; ++iter)
-  {
-    bool any_moved = false;
-
-    for (std::size_t i = 1; i + 1 < N; ++i)
-    {
-      if (clr[i] < 0.0)
-        continue;   // IK unreachable — skip
-
-      // ---- Finite-difference clearance gradient ----
-      const double eps = SMOOTH_NUDGE_STEP;
-      Eigen::Vector3d grad = Eigen::Vector3d::Zero();
-      const Eigen::Vector3d axes[3] = {
-          {eps, 0, 0}, {0, eps, 0}, {0, 0, eps}
-      };
-
-      for (int ax = 0; ax < 3; ++ax)
-      {
-        const double c_pos = pointClearance(wp[i] + axes[ax], seed);
-        const double c_neg = pointClearance(wp[i] - axes[ax], seed);
-        // Use one-sided difference if the other side is invalid
-        if (c_pos >= 0.0 && c_neg >= 0.0)
-          grad[ax] = (c_pos - c_neg) / (2.0 * eps);
-        else if (c_pos >= 0.0)
-          grad[ax] = (c_pos - clr[i]) / eps;
-        else if (c_neg >= 0.0)
-          grad[ax] = (clr[i] - c_neg) / eps;
-        // else both sides invalid → leave gradient at 0 for this axis
-      }
-
-      if (grad.norm() < 1e-9)
-        continue;   // flat clearance landscape — nothing to do
-
-      const Eigen::Vector3d candidate = wp[i] + SMOOTH_NUDGE_STEP * grad.normalized();
-
-      // ---- Reject if below clearance floor ----
-      const double clr_cand = pointClearance(candidate, seed);
-      if (clr_cand < RRT_CLEARANCE)
-        continue;
-
-      // ---- Reject if either adjacent segment becomes collision-blocked ----
-      if (!isSegmentCollisionFree(wp[i - 1], candidate, seed))
-        continue;
-      if (!isSegmentCollisionFree(candidate, wp[i + 1], seed))
-        continue;
-
-      // ---- Accept only if cost improves ----
-      const double cost_before =
-          segmentCost(wp[i - 1], wp[i],     clr[i - 1], clr[i]    ) +
-          segmentCost(wp[i],     wp[i + 1], clr[i],     clr[i + 1]);
-      const double cost_after =
-          segmentCost(wp[i - 1], candidate,  clr[i - 1], clr_cand  ) +
-          segmentCost(candidate,  wp[i + 1], clr_cand,   clr[i + 1]);
-
-      if (cost_after < cost_before)
-      {
-        wp[i]  = candidate;
-        clr[i] = clr_cand;
-        any_moved = true;
-      }
-    }
-
-    if (!any_moved)
-      break;   // converged early
-  }
-
-  return wp;
 }
 
 }  // namespace task_planner

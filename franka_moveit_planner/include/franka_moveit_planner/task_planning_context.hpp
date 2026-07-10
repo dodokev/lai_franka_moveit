@@ -43,18 +43,13 @@ public:
   bool terminate() override;
   void clear()     override;
 
-  void setParams(int iter, double step, double bias, double tol, double clr,
-                  int smooth_iter, double smooth_step, double smooth_weigth)
+  void setParams(int iter, double step, double bias, double tol, double clr)
   {
     RRT_MAX_ITER       = iter;
     RRT_STEP_SIZE      = step;
     RRT_GOAL_BIAS      = bias;
     RRT_GOAL_TOLERANCE = tol;
     RRT_CLEARANCE      = clr;
-
-    SMOOTH_NUDGE_ITERS = smooth_iter;
-    SMOOTH_NUDGE_STEP = smooth_step;
-    SMOOTH_CLEARANCE_W = smooth_weigth;
   }
 
 private:
@@ -75,21 +70,6 @@ private:
   double RRT_GOAL_BIAS      { 0.10  };   // 10 % goal bias
   double RRT_GOAL_TOLERANCE { 0.02  };   // metres
   double RRT_CLEARANCE      { 0.02  };   // hard minimum clearance (metres)
-
-  // ------------------------------------------------------------------
-  // Clearance-aware smoothing parameters
-  // ------------------------------------------------------------------
-
-  // Number of gradient-ascent nudge steps applied to each waypoint.
-  // Higher → smoother clearance, more compute.  0 = pure shortcutting.
-  int    SMOOTH_NUDGE_ITERS  { 8    };
-
-  // Step size for the finite-difference clearance gradient (metres).
-  double SMOOTH_NUDGE_STEP   { 0.02 };
-
-  // Weight that trades off path length vs clearance in the cost function.
-  // 0.0 → only shorten the path.  1.0 → only maximise clearance.
-  double SMOOTH_CLEARANCE_W  { 0.4  };
 
   // ------------------------------------------------------------------
   // Pipeline stages
@@ -119,7 +99,7 @@ private:
   // ------------------------------------------------------------------
   // Kept separate from RRT_STEP_SIZE so callers of isSegmentCollisionFree
   // (shortcutting, nudging) and the RRT expansion loop share the same value.
-  static constexpr int SEGMENT_SUBDIVISIONS = 3;
+  static constexpr int SEGMENT_SUBDIVISIONS = 5;
 
   // ------------------------------------------------------------------
   // RRT helpers
@@ -178,14 +158,6 @@ private:
 
   /// Pass 1: greedy shortcutting — same as before.
   std::vector<Eigen::Vector3d> shortcutPath(
-      const std::vector<Eigen::Vector3d>& path,
-      const moveit::core::RobotState&     seed) const;
-
-  /// Pass 2: for each interior waypoint, take SMOOTH_NUDGE_ITERS steps along
-  /// the finite-difference clearance gradient, accepting moves that improve
-  /// cost = SMOOTH_CLEARANCE_W * (-clearance) + (1-W) * segment_length, and
-  /// rejecting moves that drop below RRT_CLEARANCE or cause a collision.
-  std::vector<Eigen::Vector3d> nudgeClearance(
       const std::vector<Eigen::Vector3d>& path,
       const moveit::core::RobotState&     seed) const;
 

@@ -19,18 +19,11 @@ bool TaskPlannerManager::initialize(const moveit::core::RobotModelConstPtr& mode
   node_->get_parameter(ns + ".config.goal_tolerance", goal_tolerance_);
   node_->get_parameter(ns + ".config.clearance", clearance_);
 
-  node_->get_parameter(ns + ".config.smooth_iter", smooth_iterations_);
-  node_->get_parameter(ns + ".config.smooth_step", smooth_step_size_);
-  node_->get_parameter(ns + ".config.smooth_clearance_weigth", smooth_clearance_weight_);
-
   RCLCPP_WARN_STREAM(LOGGER, "Parameters : step:" << step_size_
     << " | iter:" << max_iterations_
     << " | bias:" << goal_bias_ 
     << " | tol:" << goal_tolerance_
     << " | clr:" << clearance_
-    << "\nsmoiter:" << smooth_iterations_
-    << " | smostep:" << smooth_step_size_
-    << " | smoclrw:" << smooth_clearance_weight_
   );
 
   return true;
@@ -58,8 +51,7 @@ planning_interface::PlanningContextPtr TaskPlannerManager::getPlanningContext(
   auto context = std::make_shared<TaskPlanningContext>(
       "task_context", req.group_name, robot_model_, planning_scene);
 
-  context->setParams(max_iterations_, step_size_, goal_bias_, goal_tolerance_, clearance_,
-    smooth_iterations_, smooth_step_size_, smooth_clearance_weight_);
+  context->setParams(max_iterations_, step_size_, goal_bias_, goal_tolerance_, clearance_);
 
   context->setMotionPlanRequest(req);
 
