@@ -985,7 +985,9 @@ void MTCTaskNode::palette()
         target.pose.position.z = z_/2 + voxel_size_/2;
 
         bool replan{true};
+        recovery_done_ = 0;
         do {
+            rclcpp::sleep_for(std::chrono::milliseconds(2000));
             replan = doTask(obj_name, target);
         } while (replan);
 
@@ -1005,7 +1007,8 @@ void MTCTaskNode::palette()
         RCLCPP_WARN(LOGGER, "Next Object");
     }
 
-    returnHome();
+    if (recovery_done_ < recovery_allowed_)
+        returnHome();
     RCLCPP_WARN(LOGGER, "Palette Finish");
 }
 
@@ -1025,10 +1028,9 @@ int main(int argc, char** argv) {
     });
 
     mtc_task_node->setupPlanningScene();
-    mtc_task_node->setupPlanner();
-    
-    // If object setup through code
     rclcpp::sleep_for(std::chrono::milliseconds(2000));
+    
+    mtc_task_node->setupPlanner();
     mtc_task_node->palette();
 
     RCLCPP_INFO(LOGGER, "STOP");

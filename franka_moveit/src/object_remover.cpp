@@ -34,7 +34,7 @@ void ObjectRemover::init()
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::remover(pcl::PointCloud<pcl::PointXYZ>::Ptr current, moveit_msgs::msg::CollisionObject& obj_msg, const std::string& parent) {
-  const double margin = 0.04; // e.g. 0.01
+  const double margin = 0.06; // e.g. 0.01
   pcl::CropBox<pcl::PointXYZ> crop;
   crop.setInputCloud(current);
   crop.setNegative(true);
