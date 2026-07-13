@@ -183,4 +183,13 @@ This example is launch on the real robot, and will execute a pick an place task 
 
 On the default rotation (rotation:=0.0 or no rotation argument), the columns are along the y-axis and the rows with the x-axis.
 
+
+Another launch command that will permit to see how your planner or robot react to the changing environment,
+```
+ros2 launch franka_moveit_mtc round_trip_mtc.launch.py robot_ip:=172.16.0.2 first_pose:="X,Y" second_pose:="X,Y" recovery:=NB
+```
+You will only have three arguments, "recovery" that does the same as the one in the previous command. "first_pose" represents the pose the object will be moved to at the first trip and "second_pose" the pose where the object will be at the second trip. Only the argument "recovery" is optional.
+The robot will go to the first pose then the second pose, and redo those 2 moves until stop.
+
+
 If you want to create your own MTC Task then go check the [official page](https://moveit.picknik.ai/main/doc/tutorials/pick_and_place_with_moveit_task_constructor/pick_and_place_with_moveit_task_constructor.html) of moveit2
