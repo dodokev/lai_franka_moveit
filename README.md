@@ -14,6 +14,11 @@ If the optional packages aren't installed you will need to provide your point cl
 
 Moreover the rs.launch.py file and the self_filter.launch.py file won't be usable, because it requires the realsense_ros package and the robot_self_filter package respectively.
 
+## Installation on a new instance
+
+There is files, in the installed packages, that has been modified to allow the use of different components.
+Those files are provided in the additional_files folder.
+
 # Console command to use the package (Considering the optional packages are installed)
 ## Perception
 
