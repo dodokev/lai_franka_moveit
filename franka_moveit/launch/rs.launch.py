@@ -220,7 +220,7 @@ def generate_launch_description():
         april,
         april_frame,
         OpaqueFunction(function=launch_setup, kwargs = {'params' : set_configurable_parameters(configurable_parameters)}),
-        outlier_node,
-        finder_node,
-        remover_node,
+        # outlier_node,
+        # finder_node,
+        # remover_node,
     ])

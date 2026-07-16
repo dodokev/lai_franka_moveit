@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    state_publish_rate: 120  # [Hz]
+    feedback_publish_rate: 120 # [Hz]
+    default_speed: 0.05  # [m/s]
+    default_grasp_epsilon:
+      inner: 0.005 # [m]
+      outer: 0.005 # [m]
