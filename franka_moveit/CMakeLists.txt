@@ -13,6 +13,10 @@ find_package(moveit_visual_tools REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(image_geometry REQUIRED)
+
 # Custom MSG
 find_package(franka_moveit_msg REQUIRED)
 
@@ -126,6 +130,8 @@ ament_target_dependencies(
   "moveit_ros_planning_interface"
   pcl_ros
   franka_moveit_msg
+  cv_bridge
+  OpenCV
 )
 ament_target_dependencies(
   object_remover

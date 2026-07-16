@@ -8,6 +8,27 @@ static auto const LOGGER = rclcpp::get_logger("object_finder");
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
     : Node("object_finder"), planning_scene_(ps) {
 
+  /**
+   * RGB Init Member
+   */
+  image_sub_ = this->create_subscription<sensor_msgs::msg::Image>("/camera/camera/color/image_raw", 10, 
+    std::bind(&ObjectFinder::image_callback,this,std::placeholders::_1));
+  
+  depth_sub_ = this->create_subscription<sensor_msgs::msg::Image>("/camera/camera/depth/image_rect_raw", 10, 
+    std::bind(&ObjectFinder::depth_callback,this,std::placeholders::_1));
+
+  info_sub_ = this->create_subscription<sensor_msgs::msg::CameraInfo>("/camera/camera/color/camera_info", 10,
+    std::bind(&ObjectFinder::info_callback,this,std::placeholders::_1));
+
+  tf_sub_ = this->create_subscription<tf2_msgs::msg::TFMessage>("/tf", 10,
+    std::bind(&ObjectFinder::tf_callback,this,std::placeholders::_1));
+    
+  contour_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  intrinsic_ = Eigen::Matrix3d::Zero();
+
+  /**
+   * Point Cloud Init Member
+   */
   pub_centroid_ = this->create_publisher<visualization_msgs::msg::Marker>("/centroid", 10);
   
   service_ = this->create_service<franka_moveit_msg::srv::EnableCreate>(
@@ -20,8 +41,7 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
   sub_unfilter_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
       "/points_used", rclcpp::SensorDataQoS(),
       std::bind(&ObjectFinder::filter_callback, this, std::placeholders::_1));
-  pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/visualize_cloud",
-                                                                        rclcpp::SensorDataQoS());
+  pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/visualize_cloud", rclcpp::SensorDataQoS());
 
   sub_size_ = this->create_subscription<std_msgs::msg::String>(
       "/add_lost_obj", rclcpp::SensorDataQoS(),
@@ -35,6 +55,83 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
   object_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   tree_ = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
 }
+
+// ================================================================================================
+/**
+ * RGB Finder Fucntion Definition
+ */
+void ObjectFinder::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+{
+  img_rgb_ = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+  cv::Mat rgb_ = img_rgb_->image;
+
+  cv::Mat hsv;
+  cv::cvtColor(rgb_, hsv, cv::COLOR_BGR2HSV);
+
+  cv::Mat mask;
+  cv::inRange(hsv, cv::Scalar(0, 55, 165), cv::Scalar(25, 255, 255), mask);
+
+  cv::findContours(mask, cluster_contour_, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+}
+
+void ObjectFinder::depth_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+{
+  img_depth_ = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+
+  if (!cluster_contour_.empty())
+  {
+    pcl::PointCloud<pcl::PointXYZ>::Ptr tmp(new pcl::PointCloud<pcl::PointXYZ>);
+    cv::Mat depth = img_depth_->image;
+
+    for (const auto& contour : cluster_contour_)
+    {
+      for (const auto& pt : contour)
+      {
+        const int u = pt.x; 
+        const int v = pt.y;
+      }
+    }
+    /**
+     * get depth value of each contour
+     * compute 3d coordinate if (intrinsic and tf not empty)
+     * create point cloud + add point
+     */
+  }
+}
+
+void ObjectFinder::info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
+{ 
+  int row{0};
+  int col{0};
+  for (const auto& value : msg->K)
+  {
+    intrinsic_(row, col) = value;
+    
+    ++col;
+    if (col == 3)
+    {
+      ++row;
+      col = 0;
+    }
+  }
+}
+
+void ObjectFinder::tf_callback(const tf2_msgs::msg::TFMessage::SharedPtr msg)
+{
+  for (const auto& tf_msg : msg->transforms)
+  {
+    if (tf_msg.header.frame_id == "camera_color_optical_frame" && tf_msg.child_frame_id == "tag36h11:15")
+    {
+      cam_to_tag_ = tf_msg.transform;
+      break;
+    }
+  }
+}
+
+// ================================================================================================
+/**
+ * Point Cloud Finder Function Definition
+ */
 
 void ObjectFinder::handle_service(
     const std::shared_ptr<franka_moveit_msg::srv::EnableCreate::Request> request,
@@ -671,10 +768,10 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
       }
   }
 
-  sensor_msgs::msg::PointCloud2 _output;
-  pcl::toROSMsg(*obj_cloud, _output);
-  _output.header.frame_id = "world";
-  pub_filtered_->publish(_output);
+  // sensor_msgs::msg::PointCloud2 _output;
+  // pcl::toROSMsg(*obj_cloud, _output);
+  // _output.header.frame_id = "world";
+  // pub_filtered_->publish(_output);
 
   for (int iter = 0; iter < 10; ++iter)
   {
@@ -1202,7 +1299,8 @@ Eigen::Affine3d ObjectFinder::poseMean(Eigen::Affine3d& p1, Eigen::Affine3d& p2)
   return mean_pose;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ================================================================================================
+
 int main(int argc, char* argv[]) {
   rclcpp::init(argc, argv);
 
