@@ -144,19 +144,9 @@ private:
                                            int goal_idx) const;
 
   // ------------------------------------------------------------------
-  // Smoothing
+  // Shortcut
   // ------------------------------------------------------------------
 
-  /// Two-pass smoother:
-  ///   Pass 1 — greedy shortcutting (removes redundant waypoints).
-  ///   Pass 2 — clearance gradient nudge (pushes surviving waypoints away
-  ///             from obstacles without violating the hard clearance floor).
-  /// Start and goal waypoints are never moved.
-  std::vector<Eigen::Vector3d> smoothPath(
-      const std::vector<Eigen::Vector3d>& path,
-      const moveit::core::RobotState&     seed) const;
-
-  /// Pass 1: greedy shortcutting — same as before.
   std::vector<Eigen::Vector3d> shortcutPath(
       const std::vector<Eigen::Vector3d>& path,
       const moveit::core::RobotState&     seed) const;

@@ -273,7 +273,7 @@ std::vector<Eigen::Vector3d> TaskPlanningContext::computeCartesianPath(
       auto raw_path = extractPath(tree, new_idx);
 
       const TimePoint t_smooth = Clock::now();
-      auto result = smoothPath(raw_path, seed);
+      auto result = shortcutPath(raw_path, seed);
       RCLCPP_INFO(LOGGER, "Path smoothing: %.1f ms  (%zu → %zu waypoints)",
                   Ms(Clock::now() - t_smooth).count(),
                   raw_path.size(), result.size());
@@ -592,15 +592,6 @@ std::vector<Eigen::Vector3d> TaskPlanningContext::extractPath(
   return path;
 }
 
-// ============================================================
-// smoothPath  —  shortcut  then  clearance nudge
-// ============================================================
-std::vector<Eigen::Vector3d> TaskPlanningContext::smoothPath(
-    const std::vector<Eigen::Vector3d>& path,
-    const moveit::core::RobotState&     seed) const
-{
-  return shortcutPath(path, seed);
-}
 
 // ------------------------------------------------------------
 // Pass 1: greedy shortcutting
