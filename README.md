@@ -76,10 +76,10 @@ SIZE has to be replaced by the size in meters of your object. The dimensions are
 Here some examples : 
 
 ```
-// -- SPHERE : [radius]
+// -- SPHERE : [radius] (Not Implemented)
 ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.2'}"
 
-// -- CYLINDER : [height,radius]
+// -- CYLINDER : [height,radius] (For standing cylinder only)ss
 ros2 topic pub /add_lost_obj std_msgs/msg/String "{data: '0.206,0.034'}"
 
 // -- BOX : [longest,..,shortest]

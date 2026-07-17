@@ -53,16 +53,13 @@ struct Object {
 
 class ObjectFinder : public rclcpp::Node {
 public:
-  ObjectFinder(moveit::planning_interface::PlanningSceneInterface* psi);
+  ObjectFinder(moveit::planning_interface::PlanningSceneInterface* psi = nullptr);
   ~ObjectFinder() = default;
 
 private:
   /**
    * RGB Computation Finder Member | Function
    */
-
-  cv_bridge::CvImagePtr img_rgb_;
-  cv_bridge::CvImagePtr img_depth_;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr contour_cloud_;
 
@@ -72,16 +69,12 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_sub_;
 
   Eigen::Matrix3d intrinsic_;
-  geometry_msgs::msg::Transform cam_to_tag_;
 
-  rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr info_sub_;
-  rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr tf_sub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
 
   void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
   void depth_callback(const sensor_msgs::msg::Image::SharedPtr msg);
-  void info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg);
-  void tf_callback(const tf2_msgs::msg::TFMessage::SharedPtr msg);
-
+  
   /**
    * Point Cloud Computation Finder Member | Function
    */

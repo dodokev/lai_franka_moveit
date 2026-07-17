@@ -5,26 +5,35 @@
 
 static auto const LOGGER = rclcpp::get_logger("object_finder");
 
+/**
+ * Instead of using RGB, cylinder fitting or save from the cylinderScoreFunction in the object
+ * Add an inliers member vector
+ * cylinderBias function : extract inlier, 
+ * Give up the RGB pipeline, too much depth dependant to be reliable
+ */
+
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
     : Node("object_finder"), planning_scene_(ps) {
 
   /**
    * RGB Init Member
    */
-  image_sub_ = this->create_subscription<sensor_msgs::msg::Image>("/camera/camera/color/image_raw", 10, 
-    std::bind(&ObjectFinder::image_callback,this,std::placeholders::_1));
+
+  // image_sub_ = this->create_subscription<sensor_msgs::msg::Image>("/camera/camera/color/image_raw", 10, 
+  //   std::bind(&ObjectFinder::image_callback,this,std::placeholders::_1));
   
-  depth_sub_ = this->create_subscription<sensor_msgs::msg::Image>("/camera/camera/depth/image_rect_raw", 10, 
-    std::bind(&ObjectFinder::depth_callback,this,std::placeholders::_1));
-
-  info_sub_ = this->create_subscription<sensor_msgs::msg::CameraInfo>("/camera/camera/color/camera_info", 10,
-    std::bind(&ObjectFinder::info_callback,this,std::placeholders::_1));
-
-  tf_sub_ = this->create_subscription<tf2_msgs::msg::TFMessage>("/tf", 10,
-    std::bind(&ObjectFinder::tf_callback,this,std::placeholders::_1));
+  // depth_sub_ = this->create_subscription<sensor_msgs::msg::Image>("/camera/camera/depth/image_rect_raw", 10, 
+  //   std::bind(&ObjectFinder::depth_callback,this,std::placeholders::_1));
     
-  contour_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
-  intrinsic_ = Eigen::Matrix3d::Zero();
+  // img_pub_ = this->create_publisher<sensor_msgs::msg::Image>("/visualize_img", 10);
+  
+  // contour_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
+  // intrinsic_ = Eigen::Matrix3d::Zero();
+  // intrinsic_(0, 0) = 213.79100036621094;
+  // intrinsic_(0, 2) = 212.39974975585938;
+  // intrinsic_(1, 1) = 213.79100036621094;
+  // intrinsic_(1, 2) = 119.67296600341797;
+  // intrinsic_(2, 2) = 1.0;
 
   /**
    * Point Cloud Init Member
@@ -62,69 +71,80 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
  */
 void ObjectFinder::image_callback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
-  img_rgb_ = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-  cv::Mat rgb_ = img_rgb_->image;
+  cv_bridge::CvImagePtr img = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
+  cv::Mat rgb = img->image;
+  cv::Mat resized;
+  cv::resize(rgb, resized, cv::Size(424, 240), 0, 0, cv::INTER_LINEAR);
+
+  // RCLCPP_WARN(LOGGER, "sizeRGB : %dx%d", rgb.rows, rgb.cols);
 
   cv::Mat hsv;
-  cv::cvtColor(rgb_, hsv, cv::COLOR_BGR2HSV);
+  cv::cvtColor(resized, hsv, cv::COLOR_BGR2HSV);
 
   cv::Mat mask;
   cv::inRange(hsv, cv::Scalar(0, 55, 165), cv::Scalar(25, 255, 255), mask);
 
   cv::findContours(mask, cluster_contour_, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+  cv::drawContours(resized, cluster_contour_, -1, cv::Scalar(0, 255, 0), 1);
+
+  img->image = resized;
+  img_pub_->publish(*img->toImageMsg());  
 }
 
 void ObjectFinder::depth_callback(const sensor_msgs::msg::Image::SharedPtr msg)
-{
-  img_depth_ = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-
+{ 
+  // RCLCPP_INFO(LOGGER, "Depth Call");
   if (!cluster_contour_.empty())
   {
+    cv_bridge::CvImagePtr img = cv_bridge::toCvCopy(msg);
     pcl::PointCloud<pcl::PointXYZ>::Ptr tmp(new pcl::PointCloud<pcl::PointXYZ>);
-    cv::Mat depth = img_depth_->image;
+    cv::Mat depth = img->image;
 
-    for (const auto& contour : cluster_contour_)
+    contour_cloud_->clear();
+    contour_cloud_->header.frame_id = "camera_depth_optical_frame";
+
+    double fx = static_cast<double>(intrinsic_(0, 0));
+    double fy = static_cast<double>(intrinsic_(1, 1));
+    double cx = static_cast<double>(intrinsic_(0, 2));
+    double cy = static_cast<double>(intrinsic_(1, 2));
+
+    // for (const auto& contour : cluster_contour_)
+    // {
+    //   for (const auto& pt : contour)
+    //   {
+    //     const int u = pt.x; 
+    //     const int v = pt.y;
+
+    //     uint16_t d = depth.at<uint16_t>(u, v);
+    //     double z =  static_cast<double>(d) / 1000;
+    //     double x = (u - cx) * z / fx;
+    //     double y = (v - cy) * z / fy;
+
+    //     pcl::PointXYZ pt_tmp(x, y, z);
+    //     contour_cloud_->points.push_back(pt_tmp);
+    //   }
+    // }
+
+    for (int row = 0; row < depth.rows; row++)
     {
-      for (const auto& pt : contour)
+      for (int col = 0; col < depth.cols; col++)
       {
-        const int u = pt.x; 
-        const int v = pt.y;
+        uint16_t d = depth.at<uint16_t>(row, col);
+        double z = static_cast<double>(d) / 1000;
+        double x = (row - cx) * z / fx;
+        double y = - (col - cy) * z / fy;
+ 
+        // RCLCPP_WARN(LOGGER, "Point : %f, %f, %f", x, y, z);
+
+        pcl::PointXYZ pt_tmp(x, y, z);
+        contour_cloud_->points.push_back(pt_tmp);       
       }
     }
-    /**
-     * get depth value of each contour
-     * compute 3d coordinate if (intrinsic and tf not empty)
-     * create point cloud + add point
-     */
-  }
-}
 
-void ObjectFinder::info_callback(const sensor_msgs::msg::CameraInfo::SharedPtr msg)
-{ 
-  int row{0};
-  int col{0};
-  for (const auto& value : msg->K)
-  {
-    intrinsic_(row, col) = value;
-    
-    ++col;
-    if (col == 3)
-    {
-      ++row;
-      col = 0;
-    }
-  }
-}
-
-void ObjectFinder::tf_callback(const tf2_msgs::msg::TFMessage::SharedPtr msg)
-{
-  for (const auto& tf_msg : msg->transforms)
-  {
-    if (tf_msg.header.frame_id == "camera_color_optical_frame" && tf_msg.child_frame_id == "tag36h11:15")
-    {
-      cam_to_tag_ = tf_msg.transform;
-      break;
-    }
+    sensor_msgs::msg::PointCloud2 _output;
+    pcl::toROSMsg(*contour_cloud_, _output);
+    _output.header.frame_id = "camera_depth_optical_frame";
+    pub_filtered_->publish(_output);
   }
 }
 
@@ -672,50 +692,79 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   Eigen::Affine3d pose;
 
-  // ---------------------------
-  // 1. Raw centroid (for fallback + axial bias heuristic only)
-  // ---------------------------
-  Eigen::Vector4f centroid4;
-  pcl::compute3DCentroid(*obj_cloud, centroid4);
-  Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
 
-  // ---------------------------
-  // 2. PCA → reliable axis direction seed
-  //    For a horizontal cylinder, col(0) is always the height axis.
-  // ---------------------------
-  // pcl::PCA<pcl::PointXYZ> pca;
-  // pca.setInputCloud(obj_cloud);
-  // Eigen::Vector3d z_axis = pca.getEigenVectors().col(0).cast<double>().normalized();
+  // --------------------------------------------------------------------------------
+  /**
+   * Cleaning
+   */
+
+  auto _cluster_tree = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
+  _cluster_tree->setInputCloud(obj_cloud);
+
+  pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> _ne;
+  _ne.setInputCloud(obj_cloud);
+  _ne.setSearchMethod(_cluster_tree);
+  _ne.setKSearch(20);
+
+  pcl::PointCloud<pcl::Normal>::Ptr _normals(new pcl::PointCloud<pcl::Normal>);
+  _ne.compute(*_normals);
+  
+  pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> _seg;
+  _seg.setOptimizeCoefficients(true);
+  _seg.setModelType(pcl::SACMODEL_CYLINDER);
+  _seg.setMethodType(pcl::SAC_RANSAC);
+  _seg.setInputNormals(_normals);
+  _seg.setNormalDistanceWeight(0.1);
+  _seg.setMaxIterations(5000);
+  _seg.setDistanceThreshold(0.04);
+  _seg.setEpsAngle(M_PI / 2.0);
+  _seg.setRadiusLimits(known_radius * 0.75, known_radius * 1.25);
+  _seg.setInputCloud(obj_cloud);
+
+  pcl::ModelCoefficients::Ptr _coeff(new pcl::ModelCoefficients);
+  pcl::PointIndices::Ptr _inliers(new pcl::PointIndices);
+  _seg.segment(*_inliers, *_coeff);
+
+  pcl::ExtractIndices<pcl::PointXYZ> _extract;
+  _extract.setInputCloud(obj_cloud);
+  _extract.setIndices(_inliers);
+  _extract.setNegative(false);
+  
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cylinder_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  _extract.filter(*cylinder_cloud);
+  // --------------------------------------------------------------------------------
+  
+  // for (std::size_t iPt = 0; iPt < obj_cloud->size(); iPt++)
+  // {
+  //     auto pt = obj_cloud->points[iPt];
+  //     if (pt.z > known_height * 0.2)
+  //     {
+  //       obj_cloud->erase(obj_cloud->begin() + iPt);
+  //       --iPt;
+  //     }
+  // }
+  for (std::size_t iPt = 0; iPt < cylinder_cloud->size(); iPt++)
+  {
+      auto pt = cylinder_cloud->points[iPt];
+      if (pt.z > known_height * 0.5)
+      {
+        cylinder_cloud->erase(cylinder_cloud->begin() + iPt);
+        --iPt;
+      }
+  }
+
+  sensor_msgs::msg::PointCloud2 _output;
+  pcl::toROSMsg(*cylinder_cloud, _output);
+  _output.header.frame_id = "world";
+  pub_filtered_->publish(_output);
+
+  Eigen::Vector4f centroid4;
+  // pcl::compute3DCentroid(*obj_cloud, centroid4);
+  pcl::compute3DCentroid(*cylinder_cloud, centroid4);
+  Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
 
   Eigen::Vector3d z_axis = table_normal_.normalized();
 
-  // Pin: make dominant component always positive → no random 180° flips
-  // int dominant = 0;
-  // z_axis.cwiseAbs().maxCoeff(&dominant);
-  // if (z_axis[dominant] < 0)
-  //   z_axis = -z_axis;
-
-  // RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-  //              "centroidBiasCylinder: cloud=%zu  h=%.3f r=%.3f", obj_cloud->size(), known_height,
-  //              known_radius);
-  // RCLCPP_DEBUG(rclcpp::get_logger("object_finder"), "cWentroidBiasCylinder: z_axis=[%.3f %.3f %.3f]",
-  //              z_axis.x(), z_axis.y(), z_axis.z());
-
-  // ---------------------------
-  // 3. Find true axis center radially
-  //
-  //  All surface points lie at distance known_radius from the true axis.
-  //  Project every point into the 2D plane perpendicular to z_axis,
-  //  then solve for the circle center of known radius that best fits them.
-  //
-  //  In 2D: |p_i - c|^2 = R^2
-  //  Expanding: |p_i|^2 - 2*p_i·c + |c|^2 = R^2
-  //  Rearranging: 2*p_i·c - |c|^2 + R^2 = |p_i|^2
-  //  This is nonlinear in c, but linearized by substituting d = |c|^2 - R^2:
-  //  2*p_i·c - d = |p_i|^2   → linear system Ax = b, x = [cx, cy, d]
-  // ---------------------------
-
-  // Build two orthonormal basis vectors spanning the plane ⊥ to z_axis
   Eigen::Vector3d abs_z = z_axis.cwiseAbs();
   Eigen::Vector3d ref;
   if (abs_z.x() <= abs_z.y() && abs_z.x() <= abs_z.z())
@@ -726,30 +775,27 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     ref = Eigen::Vector3d::UnitZ();
 
   Eigen::Vector3d x_axis = (ref - ref.dot(z_axis) * z_axis).normalized();
-  // Eigen::Vector3d x_axis = Eigen::Vector3d::UnitX();
   Eigen::Vector3d y_axis = z_axis.cross(x_axis).normalized();
 
-  // Project all points into 2D (u, v) plane centered at raw centroid
-  int N = obj_cloud->size();
+  // int N = obj_cloud->size();
+  int N = cylinder_cloud->size();
   Eigen::MatrixXd A(N, 3);
   Eigen::VectorXd b(N);
 
   for (int i = 0; i < N; ++i) {
-    Eigen::Vector3d p(obj_cloud->points[i].x, obj_cloud->points[i].y, obj_cloud->points[i].z);
+    // Eigen::Vector3d p(obj_cloud->points[i].x, obj_cloud->points[i].y, obj_cloud->points[i].z);
+    Eigen::Vector3d p(cylinder_cloud->points[i].x, cylinder_cloud->points[i].y, cylinder_cloud->points[i].z);
 
-    // Project into plane ⊥ z_axis, relative to raw centroid
     Eigen::Vector3d dp = p - centroid;
     double u = dp.dot(x_axis);
     double v = dp.dot(y_axis);
 
-    // 2*p·c - d = |p|^2   where d = |c|^2 - R^2
     A(i, 0) = 2.0 * u;
     A(i, 1) = 2.0 * v;
     A(i, 2) = -1.0;
     b(i) = u * u + v * v;
   }
   
-  // Solve least squares: x = [cu, cv, d]
   Eigen::Vector3d x = A.colPivHouseholderQr().solve(b);
   double cu = x(0);  // circle center in 2D (relative to raw centroid)
   double cv = x(1);
@@ -758,28 +804,14 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   Eigen::Vector3d tmp_position = centroid + cu * x_axis + cv * y_axis;
   Eigen::Vector2d tmp_center(tmp_position(0), tmp_position(1));
 
-  for (std::size_t iPt = 0; iPt < obj_cloud->size(); iPt++)
-  {
-      auto pt = obj_cloud->points[iPt];
-      if (pt.z > known_height * 0.9 || pt.z < known_height * 0.6)
-      {
-        obj_cloud->erase(obj_cloud->begin() + iPt);
-        --iPt;
-      }
-  }
-
-  // sensor_msgs::msg::PointCloud2 _output;
-  // pcl::toROSMsg(*obj_cloud, _output);
-  // _output.header.frame_id = "world";
-  // pub_filtered_->publish(_output);
-
   for (int iter = 0; iter < 10; ++iter)
   {
     
     Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
     Eigen::Vector2d g = Eigen::Vector2d::Zero();
     
-    for (const auto& pt : *obj_cloud)
+    // for (const auto& pt : *obj_cloud)
+    for (const auto& pt : *cylinder_cloud)
     {
         Eigen::Vector3d p3(pt.x, pt.y, pt.z);
         
@@ -816,17 +848,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   cv = center.y();
 
   Eigen::Vector3d correction = cu * x_axis + cv * y_axis;
-  Eigen::Vector3d axis_center = centroid + 0.75 * correction;
-
-  // RCLCPP_INFO(LOGGER,
-  //   "centroid = %.3f %.3f %.3f",
-  //   centroid.x(), centroid.y(), centroid.z());
-
-  // RCLCPP_INFO(LOGGER,
-  //     "correction = %.3f %.3f %.3f",
-  //     (cu*x_axis + cv*y_axis).x(),
-  //     (cu*x_axis + cv*y_axis).y(),
-  //     (cu*x_axis + cv*y_axis).z());
+  Eigen::Vector3d axis_center = centroid + 1.0 * correction;
 
   // ---------------------------
   // 4. Bias along Z (axial correction) — relative to axis_center now
@@ -883,36 +905,6 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   pose.linear() = R;
   pose.translation() = true_center;
-
-  // visualization_msgs::msg::Marker _marker;
-  // _marker.header.frame_id = "world";
-  // _marker.header.stamp = rclcpp::Clock().now();
-
-  // _marker.ns = "centroid";
-  // _marker.id = 0;
-  // _marker.type = visualization_msgs::msg::Marker::SPHERE;
-  // _marker.action = visualization_msgs::msg::Marker::ADD;
-
-  // // Position = your centroid
-  // _marker.pose.position.x = true_center(0);
-  // _marker.pose.position.y = true_center(1);
-  // _marker.pose.position.z = true_center(2);
-
-  // // No rotation needed
-  // _marker.pose.orientation.w = 1.0;
-
-  // // Size of the sphere
-  // _marker.scale.x = 0.02;
-  // _marker.scale.y = 0.02;
-  // _marker.scale.z = 0.02;
-
-  // // Color (red here)
-  // _marker.color.r = 1.0;
-  // _marker.color.g = 0.0;
-  // _marker.color.b = 0.0;
-  // _marker.color.a = 1.0;
-
-  // pub_centroid_->publish(_marker);
 
   return pose;
 }
@@ -1304,8 +1296,9 @@ Eigen::Affine3d ObjectFinder::poseMean(Eigen::Affine3d& p1, Eigen::Affine3d& p2)
 int main(int argc, char* argv[]) {
   rclcpp::init(argc, argv);
 
-  moveit::planning_interface::PlanningSceneInterface _planning_scene;
-  auto node = std::make_shared<ObjectFinder>(&_planning_scene);
+  // moveit::planning_interface::PlanningSceneInterface _planning_scene;
+  // auto node = std::make_shared<ObjectFinder>(&_planning_scene);
+  auto node = std::make_shared<ObjectFinder>();
 
   RCLCPP_INFO(LOGGER, "Object Finder Node ON");
   rclcpp::spin(node);
