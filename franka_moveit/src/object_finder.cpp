@@ -690,82 +690,100 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   double known_radius = dim[1];
   double known_height = dim[0];
 
+  bool standing{false};
+  Eigen::Vector3d height_axis = Eigen::Vector3d::Zero();
   Eigen::Affine3d pose;
 
+  {
+    Eigen::Vector4d centroid;
+    pcl::compute3DCentroid(*obj_cloud, centroid);
+    
+    Eigen::Matrix3d covariance;
+    pcl::computeCovarianceMatrixNormalized(*obj_cloud, centroid, covariance);
+    
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(covariance);
+    Eigen::Matrix3d eigvecs = solver.eigenvectors();
+    height_axis = eigvecs.col(2).normalized();
 
+    float dot = height_axis.dot(table_normal_.normalized());
+    if (dot < 0)
+      height_axis *= -1.0;
+
+    if (std::abs(dot) > 0.8f) 
+    {
+      standing = true;
+      height_axis = table_normal_.normalized();
+    }
+  }
+  
   // --------------------------------------------------------------------------------
   /**
-   * Cleaning
+   * Cleaning for standing cylinder
    */
 
-  auto _cluster_tree = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
-  _cluster_tree->setInputCloud(obj_cloud);
-
-  pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> _ne;
-  _ne.setInputCloud(obj_cloud);
-  _ne.setSearchMethod(_cluster_tree);
-  _ne.setKSearch(20);
-
-  pcl::PointCloud<pcl::Normal>::Ptr _normals(new pcl::PointCloud<pcl::Normal>);
-  _ne.compute(*_normals);
-  
-  pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> _seg;
-  _seg.setOptimizeCoefficients(true);
-  _seg.setModelType(pcl::SACMODEL_CYLINDER);
-  _seg.setMethodType(pcl::SAC_RANSAC);
-  _seg.setInputNormals(_normals);
-  _seg.setNormalDistanceWeight(0.1);
-  _seg.setMaxIterations(5000);
-  _seg.setDistanceThreshold(0.04);
-  _seg.setEpsAngle(M_PI / 2.0);
-  _seg.setRadiusLimits(known_radius * 0.75, known_radius * 1.25);
-  _seg.setInputCloud(obj_cloud);
-
-  pcl::ModelCoefficients::Ptr _coeff(new pcl::ModelCoefficients);
-  pcl::PointIndices::Ptr _inliers(new pcl::PointIndices);
-  _seg.segment(*_inliers, *_coeff);
-
-  pcl::ExtractIndices<pcl::PointXYZ> _extract;
-  _extract.setInputCloud(obj_cloud);
-  _extract.setIndices(_inliers);
-  _extract.setNegative(false);
-  
-  pcl::PointCloud<pcl::PointXYZ>::Ptr cylinder_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-  _extract.filter(*cylinder_cloud);
-  // --------------------------------------------------------------------------------
-  
-  // for (std::size_t iPt = 0; iPt < obj_cloud->size(); iPt++)
-  // {
-  //     auto pt = obj_cloud->points[iPt];
-  //     if (pt.z > known_height * 0.2)
-  //     {
-  //       obj_cloud->erase(obj_cloud->begin() + iPt);
-  //       --iPt;
-  //     }
-  // }
-  for (std::size_t iPt = 0; iPt < cylinder_cloud->size(); iPt++)
+  pcl::PointCloud<pcl::PointXYZ>::Ptr cylinder_cloud(new pcl::PointCloud<pcl::PointXYZ>(*obj_cloud));
+  if (standing)
   {
+    auto _cluster_tree = std::make_shared<pcl::search::KdTree<pcl::PointXYZ>>();
+    _cluster_tree->setInputCloud(obj_cloud);
+    
+    pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> _ne;
+    _ne.setInputCloud(obj_cloud);
+    _ne.setSearchMethod(_cluster_tree);
+    _ne.setKSearch(20);
+
+    pcl::PointCloud<pcl::Normal>::Ptr _normals(new pcl::PointCloud<pcl::Normal>);
+    _ne.compute(*_normals);
+    
+    pcl::SACSegmentationFromNormals<pcl::PointXYZ, pcl::Normal> _seg;
+    _seg.setOptimizeCoefficients(true);
+    _seg.setModelType(pcl::SACMODEL_CYLINDER);
+    _seg.setMethodType(pcl::SAC_RANSAC);
+    _seg.setInputNormals(_normals);
+    _seg.setNormalDistanceWeight(0.2);
+    _seg.setMaxIterations(5000);
+    _seg.setDistanceThreshold(0.04);
+    _seg.setEpsAngle(M_PI / 2.0);
+    _seg.setRadiusLimits(known_radius * 0.75, known_radius * 1.25);
+    _seg.setInputCloud(obj_cloud);
+    
+    pcl::ModelCoefficients::Ptr _coeff(new pcl::ModelCoefficients);
+    pcl::PointIndices::Ptr _inliers(new pcl::PointIndices);
+    _seg.segment(*_inliers, *_coeff);
+    
+    pcl::ExtractIndices<pcl::PointXYZ> _extract;
+    _extract.setInputCloud(obj_cloud);
+    _extract.setIndices(_inliers);
+    _extract.setNegative(false);
+    
+    _extract.filter(*cylinder_cloud);
+    // --------------------------------------------------------------------------------
+    /**
+     * Keep points near table
+     */
+    
+    for (std::size_t iPt = 0; iPt < cylinder_cloud->size(); iPt++)
+    {
       auto pt = cylinder_cloud->points[iPt];
       if (pt.z > known_height * 0.5)
       {
         cylinder_cloud->erase(cylinder_cloud->begin() + iPt);
         --iPt;
       }
+    }
+    // --------------------------------------------------------------------------------
   }
-
+    
   sensor_msgs::msg::PointCloud2 _output;
   pcl::toROSMsg(*cylinder_cloud, _output);
   _output.header.frame_id = "world";
   pub_filtered_->publish(_output);
 
   Eigen::Vector4f centroid4;
-  // pcl::compute3DCentroid(*obj_cloud, centroid4);
   pcl::compute3DCentroid(*cylinder_cloud, centroid4);
   Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
 
-  Eigen::Vector3d z_axis = table_normal_.normalized();
-
-  Eigen::Vector3d abs_z = z_axis.cwiseAbs();
+  Eigen::Vector3d abs_z = height_axis.cwiseAbs();
   Eigen::Vector3d ref;
   if (abs_z.x() <= abs_z.y() && abs_z.x() <= abs_z.z())
     ref = Eigen::Vector3d::UnitX();
@@ -774,8 +792,8 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   else
     ref = Eigen::Vector3d::UnitZ();
 
-  Eigen::Vector3d x_axis = (ref - ref.dot(z_axis) * z_axis).normalized();
-  Eigen::Vector3d y_axis = z_axis.cross(x_axis).normalized();
+  Eigen::Vector3d x_axis = (ref - ref.dot(height_axis) * height_axis).normalized();
+  Eigen::Vector3d y_axis = height_axis.cross(x_axis).normalized();
 
   // int N = obj_cloud->size();
   int N = cylinder_cloud->size();
@@ -850,58 +868,36 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   Eigen::Vector3d correction = cu * x_axis + cv * y_axis;
   Eigen::Vector3d axis_center = centroid + 1.0 * correction;
 
-  // ---------------------------
-  // 4. Bias along Z (axial correction) — relative to axis_center now
-  // ---------------------------
-
   // ===============================================================================
   // Fixed to known height for now
   Eigen::Vector3d true_center = axis_center;
-  true_center(2) = known_height / 2 + 0.01;
+  if (standing)
+    true_center(2) = known_height / 2 + 0.01;
+  else 
+  {
+    double min_proj = std::numeric_limits<double>::max();
+    double max_proj = -std::numeric_limits<double>::max();
+
+    for (const auto& pt : *cylinder_cloud)
+    {
+      Eigen::Vector3d p(pt.x, pt.y, pt.z);
+
+      double proj = (p - axis_center).dot(height_axis);
+
+      min_proj = std::min(min_proj, proj);
+      max_proj = std::max(max_proj, proj);
+    }
+
+    double center_proj = 0.5 * (min_proj + max_proj);
+
+    true_center = axis_center + center_proj * height_axis;
+  }
   // ===============================================================================
 
-  // double min_t = 1e9;
-  // double max_t = -1e9;
-
-  // for (const auto& pt : *obj_cloud) {
-  //   Eigen::Vector3d p(pt.x, pt.y, pt.z);
-  //   double t = (p - axis_center).dot(z_axis);
-  //   min_t = std::min(min_t, t);
-  //   max_t = std::max(max_t, t);
-  // }
-
-  // double observed_height = max_t - min_t;
-  // double bias = 0.0;
-
-  // if (observed_height >= known_height * 0.85) {
-  //   bias = (min_t + max_t) / 2.0;
-  //   RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-  //                "centroidBiasCylinder: both caps visible, bias=%.3f", bias);
-  // } else {
-  //   if (std::abs(max_t) >= std::abs(min_t)) {
-  //     bias = max_t - known_height / 2.0;
-  //     RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-  //                  "centroidBiasCylinder: max cap anchor (max_t=%.3f), bias=%.3f", max_t, bias);
-  //   } else {
-  //     bias = min_t + known_height / 2.0;
-  //     RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-  //                  "centroidBiasCylinder: min cap anchor (min_t=%.3f), bias=%.3f", min_t, bias);
-  //   }
-  // }
-
-  // Eigen::Vector3d true_center = axis_center + (bias) * z_axis;
-
-  // RCLCPP_DEBUG(rclcpp::get_logger("object_finder"),
-  //              "centroidBiasCylinder: true_center=[%.3f %.3f %.3f]", true_center.x(),
-              //  true_center.y(), true_center.z());
-
-  // ---------------------------
-  // 6. Build final pose
-  // ---------------------------
   Eigen::Matrix3d R;
   R.col(0) = x_axis;
   R.col(1) = y_axis;
-  R.col(2) = z_axis;
+  R.col(2) = height_axis;
 
   pose.linear() = R;
   pose.translation() = true_center;

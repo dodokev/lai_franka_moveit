@@ -141,11 +141,9 @@ def generate_launch_description():
 
     first_pose = LaunchConfiguration("first_pose")
     second_pose = LaunchConfiguration("second_pose")
-    recovery = LaunchConfiguration("recovery")
     
     first_pose_arg = DeclareLaunchArgument("first_pose")
     second_pose_arg = DeclareLaunchArgument("second_pose")
-    recovery_arg = DeclareLaunchArgument("recovery", default_value="0")
 
     package = "franka_moveit_mtc"
     package_shared_path = get_package_share_directory(package)
@@ -165,7 +163,6 @@ def generate_launch_description():
             {
                 "first_pose": first_pose,
                 "second_pose": second_pose,
-                "recovery": recovery
             },
         ],
         emulate_tty=True,
@@ -182,6 +179,5 @@ def generate_launch_description():
 
         first_pose_arg,
         second_pose_arg,
-        recovery_arg,
         
         node])

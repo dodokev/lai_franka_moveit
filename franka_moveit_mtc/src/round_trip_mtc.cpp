@@ -92,8 +92,6 @@ private:
     std::string hand_frame_;
 
     std::string stage_failed_{""};
-    int recovery_allowed_;
-    int recovery_done_{0};
 
     // -- Object
     SHAPE type_{SHAPE::NONE};
@@ -173,7 +171,6 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
 
     std::string tmp_first_pose = node_->get_parameter("first_pose").as_string();
     std::string tmp_second_pose = node_->get_parameter("second_pose").as_string();
-    recovery_allowed_ = node_->get_parameter("recovery").as_int();
 
     std::vector<std::string> _param_split;
     boost::split(_param_split, tmp_first_pose, boost::is_any_of(","));
@@ -915,13 +912,9 @@ bool MTCTaskNode::doTask(std::string& object_name, geometry_msgs::msg::PoseStamp
             setupObjectPose(object_name);
             moved_ = false;
             return true;
-        } else if (recovery_done_ < recovery_allowed_) {
-            ++recovery_done_;
-            RCLCPP_WARN(LOGGER, "Task Recovery %d out of %d", recovery_done_, recovery_allowed_);
-            return true;
         } else {
-            RCLCPP_ERROR(LOGGER, "No more recovery possible");
-            return false;
+            RCLCPP_WARN(LOGGER, "Task Recovery");
+            return true;
         }
     }
 
@@ -966,7 +959,6 @@ void MTCTaskNode::roundTrip()
         target.pose.position.z = z_/2 + voxel_size_/2;
 
         bool replan{true};
-        recovery_done_ = 0;
         do {
             rclcpp::sleep_for(std::chrono::milliseconds(2000));
             replan = doTask(current_obj_, target);
@@ -974,9 +966,8 @@ void MTCTaskNode::roundTrip()
 
         reverse = !reverse;
     }
-
-    if (recovery_done_ < recovery_allowed_)
-        returnHome();
+    
+    returnHome();
     RCLCPP_WARN(LOGGER, "Palette Finish");
 }
 

@@ -191,9 +191,11 @@ On the default rotation (rotation:=0.0 or no rotation argument), the columns are
 
 Another launch command that will permit to see how your planner or robot react to the changing environment,
 ```
-ros2 launch franka_moveit_mtc round_trip_mtc.launch.py robot_ip:=172.16.0.2 first_pose:="X,Y" second_pose:="X,Y" recovery:=NB
+ros2 launch franka_moveit_mtc round_trip_mtc.launch.py robot_ip:=IP use_fake_hardware:={true|false} first_pose:="X,Y" second_pose:="X,Y"
+// -- Example --
+ros2 launch franka_moveit_mtc round_trip_mtc.launch.py robot_ip:=172.16.0.2 first_pose:="0.5,0.25" second_pose:="0.5,-0.25"
 ```
-You will only have three arguments, "recovery" that does the same as the one in the previous command. "first_pose" represents the pose the object will be moved to at the first trip and "second_pose" the pose where the object will be at the second trip. Only the argument "recovery" is optional.
+You will only have two arguments. "first_pose" represents the pose the object will be moved to at the first trip and "second_pose" the pose where the object will be at the second trip. Only the argument "recovery" is optional.
 The robot will go to the first pose then the second pose, and redo those 2 moves until stop.
 
 
