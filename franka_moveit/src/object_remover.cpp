@@ -9,7 +9,7 @@ ObjectRemover::ObjectRemover(moveit::planning_interface::PlanningSceneInterface*
     : Node("object_finder"), planning_scene_(ps) {
   
   sub_unfilter_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "/points_used", rclcpp::SensorDataQoS(),
+    "/finder_cloud", rclcpp::SensorDataQoS(),
     std::bind(&ObjectRemover::callback, this, std::placeholders::_1));
   pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
     "/octocloud",

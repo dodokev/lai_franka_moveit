@@ -5,13 +5,6 @@
 
 static auto const LOGGER = rclcpp::get_logger("object_finder");
 
-/**
- * Instead of using RGB, cylinder fitting or save from the cylinderScoreFunction in the object
- * Add an inliers member vector
- * cylinderBias function : extract inlier, 
- * Give up the RGB pipeline, too much depth dependant to be reliable
- */
-
 ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* ps)
     : Node("object_finder"), planning_scene_(ps) {
 
@@ -50,7 +43,7 @@ ObjectFinder::ObjectFinder(moveit::planning_interface::PlanningSceneInterface* p
   sub_unfilter_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
       "/points_used", rclcpp::SensorDataQoS(),
       std::bind(&ObjectFinder::filter_callback, this, std::placeholders::_1));
-  pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/visualize_cloud", rclcpp::SensorDataQoS());
+  pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/finder_cloud", rclcpp::SensorDataQoS());
 
   sub_size_ = this->create_subscription<std_msgs::msg::String>(
       "/add_lost_obj", rclcpp::SensorDataQoS(),
@@ -132,12 +125,12 @@ void ObjectFinder::depth_callback(const sensor_msgs::msg::Image::SharedPtr msg)
         uint16_t d = depth.at<uint16_t>(row, col);
         double z = static_cast<double>(d) / 1000;
         double x = (row - cx) * z / fx;
-        double y = - (col - cy) * z / fy;
+        double y = (col - cy) * z / fy;
  
         // RCLCPP_WARN(LOGGER, "Point : %f, %f, %f", x, y, z);
 
         pcl::PointXYZ pt_tmp(x, y, z);
-        contour_cloud_->points.push_back(pt_tmp);       
+        contour_cloud_->points.push_back(pt_tmp);
       }
     }
 
@@ -741,9 +734,8 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     _seg.setMethodType(pcl::SAC_RANSAC);
     _seg.setInputNormals(_normals);
     _seg.setNormalDistanceWeight(0.2);
-    _seg.setMaxIterations(5000);
+    _seg.setMaxIterations(5000);  
     _seg.setDistanceThreshold(0.04);
-    _seg.setEpsAngle(M_PI / 2.0);
     _seg.setRadiusLimits(known_radius * 0.75, known_radius * 1.25);
     _seg.setInputCloud(obj_cloud);
     
@@ -762,22 +754,22 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
      * Keep points near table
      */
     
-    for (std::size_t iPt = 0; iPt < cylinder_cloud->size(); iPt++)
-    {
-      auto pt = cylinder_cloud->points[iPt];
-      if (pt.z > known_height * 0.5)
-      {
-        cylinder_cloud->erase(cylinder_cloud->begin() + iPt);
-        --iPt;
-      }
-    }
-    // --------------------------------------------------------------------------------
+    // for (std::size_t iPt = 0; iPt < cylinder_cloud->size(); iPt++)
+    // {
+    //   auto pt = cylinder_cloud->points[iPt];
+    //   if (pt.z > known_height * 0.25)
+    //   {
+    //     cylinder_cloud->erase(cylinder_cloud->begin() + iPt);
+    //     --iPt;
+    //   }
+    // }
   }
+  // --------------------------------------------------------------------------------
     
-  sensor_msgs::msg::PointCloud2 _output;
-  pcl::toROSMsg(*cylinder_cloud, _output);
-  _output.header.frame_id = "world";
-  pub_filtered_->publish(_output);
+  // sensor_msgs::msg::PointCloud2 _output;
+  // pcl::toROSMsg(*cylinder_cloud, _output);
+  // _output.header.frame_id = "world";
+  // pub_filtered_->publish(_output);
 
   Eigen::Vector4f centroid4;
   pcl::compute3DCentroid(*cylinder_cloud, centroid4);
@@ -980,6 +972,23 @@ void ObjectFinder::createObstacle(Eigen::Affine3d& pose, const std::vector<doubl
     createCylinder(pose, dim, numero);
 }
 
+void ObjectFinder::publishFilteredCloud(std_msgs::msg::Header& header, std::set<std::size_t>& leftover)
+{
+  pcl::PointCloud<pcl::PointXYZ>::Ptr leftover_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  for (const auto& leftover_index : leftover)
+  {
+    for (const auto& idx : cluster_indices_[leftover_index].indices)
+      leftover_cloud->points.push_back(cluster_cloud_->points[idx]);
+  }
+
+  *leftover_cloud += *table_;
+
+  sensor_msgs::msg::PointCloud2 _output;
+  pcl::toROSMsg(*leftover_cloud, _output);
+  _output.header = header;
+  pub_filtered_->publish(_output);
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg) {
   if (!begin_ && !enable_create_)
@@ -1082,24 +1091,25 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     ++cluster_num;
   }
 
-  // Current pose of each objects
+  std::set<std::size_t> usable_cluster;
   std::vector<Eigen::Vector3d> cluster_positions;
-  for (const auto& c : cluster_indices_)
+  for (std::size_t _cluster = 0; _cluster < cluster_indices_.size(); _cluster++)
   {
-      object_cloud_->clear();
+    usable_cluster.insert(_cluster);
+    object_cloud_->clear();
 
-      for (const auto& idx : c.indices)
-          object_cloud_->push_back(cluster_cloud_->points[idx]);
+    for (const auto& idx : cluster_indices_[_cluster].indices)
+        object_cloud_->push_back(cluster_cloud_->points[idx]);
 
-      if(object_cloud_->empty())
-      {
-          cluster_positions.push_back(Eigen::Vector3d::Zero());
-          continue;
-      }
+    if(object_cloud_->empty())
+    {
+        cluster_positions.push_back(Eigen::Vector3d::Zero());
+        continue;
+    }
 
-      Eigen::Vector4d centroid;
-      pcl::compute3DCentroid(*object_cloud_, centroid);
-      cluster_positions.push_back(centroid.head<>(3));
+    Eigen::Vector4d centroid;
+    pcl::compute3DCentroid(*object_cloud_, centroid);
+    cluster_positions.push_back(centroid.head<>(3));
   }
 
   // ── Assignment: greedily match each object instance to its best cluster ──
@@ -1107,6 +1117,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   std::size_t nb_cluster = cluster_indices_.size();
   std::size_t flat_offset = 0;  // running offset into the flattened object-instance axis
 
+  std::set<std::size_t> used_cluster;
   for (std::size_t n_object = 0; n_object < objects_.size(); n_object++) {
     auto type   = objects_[n_object].shape;
     auto dim    = objects_[n_object].dimension;
@@ -1138,7 +1149,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       int _index = static_cast<int>(std::distance(tmp_score.begin(), _it));
 
       
-      // RCLCPP_WARN(LOGGER, "Best cluster index: %d  (score: %.3f)", _index, *_it);
+      RCLCPP_WARN(LOGGER, "Best cluster index: %d  (score: %.3f)", _index, *_it);
       
       for (std::size_t i = 0; i < number; i++)
       _tab_score.at(_index).at(flat_offset + i) = 0.0;
@@ -1147,11 +1158,13 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       for (const auto& idx : cluster_indices_[_index].indices)
         object_cloud_->points.push_back(cluster_cloud_->points[idx]);
       
-      if (*_it < 0.4)
+      if (*_it < 0.6)
       {
         objects_[n_object].poses[counter] = Eigen::Affine3d::Identity();
         continue;
       }
+
+      used_cluster.insert(static_cast<std::size_t>(_index));
 
       // =====================================================================================================
       // Pose computation part
@@ -1201,7 +1214,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
                 objects_[n_object].have_candidate[counter] = false;
               }
               
-              if (objects_[n_object].confidences[counter] >= 3)
+              if (objects_[n_object].confidences[counter] >= 10)
               {
                 // RCLCPP_WARN(LOGGER, "enough Condifnde");
                 objects_[n_object].confidences[counter] = 0;
@@ -1220,11 +1233,12 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
     flat_offset += number;
   }
 
-  // sensor_msgs::msg::PointCloud2 _output;
-  // pcl::toROSMsg(*cluster_cloud_, _output);
-  // _output.header = cloud_msg->header;
-  // pub_filtered_->publish(_output);
-
+  std::set<std::size_t> leftover = usable_cluster;
+  for (const auto& v : used_cluster)
+    leftover.erase(v);
+  // used_cluster, usable_cluster
+  publishFilteredCloud(cloud_msg->header, leftover);
+  
   cluster_indices_.clear();  
 
   if (enable_create_)
@@ -1237,14 +1251,17 @@ void ObjectFinder::createAllObjects()
   for (std::size_t n_object = 0; n_object < objects_.size(); n_object++) {
     auto type = objects_[n_object].shape;
     auto dim  = objects_[n_object].dimension;
-
+ 
+    std::size_t index_offset = n_object * objects_.size();
     for (std::size_t counter = 0; counter < objects_[n_object].number; counter++) {
       
         Eigen::Affine3d pose = objects_[n_object].poses[counter];
+        // RCLCPP_WARN_STREAM(LOGGER, "POSE : " << pose.translation());
         if (pose.translation() == Eigen::Affine3d::Identity().translation())
           continue;
         
-        createObstacle(pose, dim, type, counter);
+        std::size_t object_number_id = index_offset + counter;
+        createObstacle(pose, dim, type, object_number_id);
     }
   }
 }
