@@ -108,6 +108,8 @@ ros2 launch fr3_moveit_controller.launch.py robot_ip:=dont-care use_fake_hardwar
 
 The gripper used in the simulation is different from the real gripper of the franka_ros2 package. So if you send an action or anything related to the gripper in simulation, you have to modify your code for the real gripper.
 
+There is another argument called static_setup:={false|true}, it create a collision object representating the metal pillar on the table. It is mandatory if the camera is mounted on the pillar, because the camera cannot see it. Otherwise, you could plug another camera and perceive from another angle.
+
 ---
 ### Simple Planning
 

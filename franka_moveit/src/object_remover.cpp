@@ -311,19 +311,25 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCl
   return filtered;
 }
 
+
 void ObjectRemover::callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg) {
   RCLCPP_DEBUG(LOGGER, "Received point cloud");
-
+  
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::fromROSMsg(*cloud_msg, *cloud);
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr current(new pcl::PointCloud<pcl::PointXYZ>(*cloud));
-
+  
   auto object_map = planning_scene_->getObjects();
   // RCLCPP_INFO(LOGGER, "Start remover");
   for (auto& obj : object_map)
   {
+    
     auto& obj_msg = obj.second;
+    std::string tmp_id = obj_msg.id;
+    std::remove_if(tmp_id.begin(), tmp_id.end(), [](unsigned char c){return std::isdigit(c);});
+    
+    if (tmp_id == "static") continue;
     if (obj_msg.primitives.empty()) continue;
     current = removerByCluster(current, obj_msg);
     current = remover(current, obj_msg);

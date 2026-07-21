@@ -30,6 +30,11 @@
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/transform.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2_eigen/tf2_eigen.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_sensor_msgs/tf2_sensor_msgs.hpp>
 
 
 enum Shape { NONE, SPHERE, CYLINDER, BOX };
@@ -53,7 +58,7 @@ struct Object {
 
 class ObjectFinder : public rclcpp::Node {
 public:
-  ObjectFinder(moveit::planning_interface::PlanningSceneInterface* psi = nullptr);
+  ObjectFinder();
   ~ObjectFinder() = default;
 
 private:
@@ -62,19 +67,18 @@ private:
    */
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr contour_cloud_;
-
+  
   std::vector<std::vector<cv::Point>> cluster_contour_;
   
+  tf2_ros::Buffer tf_buffer_;
+  tf2_ros::TransformListener tf_listener_;
+
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_sub_;
 
   Eigen::Matrix3d intrinsic_;
 
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
-
   void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
-  void depth_callback(const sensor_msgs::msg::Image::SharedPtr msg);
-  
   /**
    * Point Cloud Computation Finder Member | Function
    */
@@ -93,6 +97,7 @@ private:
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr table_;
   Eigen::Vector3d table_normal_;
+  Eigen::Vector3d table_point_;
   double table_d_;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
@@ -106,9 +111,6 @@ private:
   pcl::search::KdTree<pcl::PointXYZ>::Ptr tree_;
 
   std::vector<Object> objects_;
-
-  moveit::planning_interface::PlanningSceneInterface* planning_scene_;
-
 
   double penality_factor_{1.1};
   bool begin_{false};

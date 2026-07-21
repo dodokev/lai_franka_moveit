@@ -25,7 +25,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     Shutdown
 )
-from launch.conditions import UnlessCondition
+from launch.conditions import UnlessCondition, IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
     Command,
@@ -293,6 +293,16 @@ def generate_launch_description():
                           use_fake_hardware_parameter_name: use_fake_hardware,
                           'namespace': namespace}.items(),
     )
+
+    static_setup = LaunchConfiguration("static_setup")
+    static_setup_arg = DeclareLaunchArgument("static_setup", default_value='false')
+    setup_node = Node(
+        package="franka_moveit",
+        executable="additional_setup",
+        output="log",
+        condition=IfCondition(static_setup),
+    )
+
     return LaunchDescription(
         [robot_arg,
          namespace_arg,
@@ -301,6 +311,7 @@ def generate_launch_description():
          use_fake_hardware_arg,
          fake_sensor_commands_arg,
          db_arg,
+         static_setup_arg,
          rviz_node,
          robot_state_publisher,
          run_move_group_node,
@@ -310,6 +321,7 @@ def generate_launch_description():
          gripper_launch_file,
          static_tf_node,
          octomap_cleaner_node,
+         setup_node,
          ]
         + load_controllers
     )

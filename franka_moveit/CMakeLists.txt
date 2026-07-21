@@ -38,6 +38,8 @@ add_executable(object_finder src/object_finder.cpp)
 add_executable(object_remover src/object_remover.cpp)
 add_executable(bridge_franka src/bridge_franka.cpp)
 
+add_executable(additional_setup src/additional_setup.cpp)
+
 # ================================================================================
 # --- Include directories ---
 
@@ -72,6 +74,10 @@ target_include_directories(object_remover PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
 target_include_directories(bridge_franka PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+  
+target_include_directories(additional_setup PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
   
@@ -147,6 +153,12 @@ ament_target_dependencies(
   franka_moveit_msg
 )
 
+ament_target_dependencies(
+  additional_setup
+  "rclcpp"
+  "moveit_ros_planning_interface"
+)
+
 # ================================================================================
 # --- Compile features ---
 
@@ -164,12 +176,15 @@ target_compile_features(object_finder PUBLIC c_std_99 cxx_std_17)
 target_compile_features(object_remover PUBLIC c_std_99 cxx_std_17)
 target_compile_features(bridge_franka PUBLIC c_std_99 cxx_std_17)
 
+target_compile_features(additional_setup PUBLIC c_std_99 cxx_std_17)
+
 # ================================================================================
 # --- Install executable to lib ---
 
 install(TARGETS franka_moveit explore_nullspace simple_movement
   cloud_transform outlier_filter octomap_generator
   object_finder object_remover bridge_franka statistic_exp
+  additional_setup
 DESTINATION lib/${PROJECT_NAME})
 
 # ================================================================================
