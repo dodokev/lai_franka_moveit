@@ -63,23 +63,6 @@ public:
 
 private:
   /**
-   * RGB Computation Finder Member | Function
-   */
-
-  pcl::PointCloud<pcl::PointXYZ>::Ptr contour_cloud_;
-  
-  std::vector<std::vector<cv::Point>> cluster_contour_;
-  
-  tf2_ros::Buffer tf_buffer_;
-  tf2_ros::TransformListener tf_listener_;
-
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
-
-  Eigen::Matrix3d intrinsic_;
-
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr img_pub_;
-  void image_callback(const sensor_msgs::msg::Image::SharedPtr msg);
-  /**
    * Point Cloud Computation Finder Member | Function
    */
   bool enable_create_{true};
@@ -94,11 +77,12 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_unfilter_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_size_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_filtered_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_test_;
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr table_;
   Eigen::Vector3d table_normal_;
-  Eigen::Vector3d table_point_;
-  double table_d_;
+  Eigen::Vector4d table_coeff_;
+  double table_d_;  
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_;
   pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_cloud_;
@@ -146,6 +130,8 @@ private:
   Eigen::Affine3d centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, const std::vector<double>& dim);
   Eigen::Affine3d centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud, const std::vector<double>& dim);
     
+  double computeError(const Eigen::Vector2d& center, const std::vector<Eigen::Vector3d>& pts);
+
   void createAllObjects();
   void createObstacle(Eigen::Affine3d& pose, const std::vector<double>& dim, const Shape& type, std::size_t& numero);
   void createBox(Eigen::Affine3d& pose, const std::vector<double>& dim, std::size_t& numero);

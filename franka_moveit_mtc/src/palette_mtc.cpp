@@ -1007,7 +1007,7 @@ void MTCTaskNode::palette()
         RCLCPP_WARN(LOGGER, "Next Object");
     }
 
-    if (recovery_done_ < recovery_allowed_)
+    if (recovery_done_ <= recovery_allowed_)
         returnHome();
     RCLCPP_WARN(LOGGER, "Palette Finish");
 }
