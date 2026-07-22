@@ -655,7 +655,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
    */
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr cylinder_cloud(new pcl::PointCloud<pcl::PointXYZ>(*obj_cloud));
-  // Eigen::Vector2d center;
+  Eigen::Vector2d center;
   if (standing) {
     // ================================================================================================================================================================
     
@@ -671,7 +671,10 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     crop.setMax(Eigen::Vector4f( known_radius * 1.05,  known_radius * 1.05, known_height/4, 1.0));
 
     crop.filter(*cylinder_cloud);
-    // center = Eigen::Vector2d(centroid(0), centroid(1));
+
+    // Recompute with lesser point cloud
+    pcl::compute3DCentroid(*cylinder_cloud, centroid);
+    center = Eigen::Vector2d(centroid(0), centroid(1));
     
     // ================================================================================================================================================================
     
@@ -784,7 +787,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   Eigen::Vector3d x = A.colPivHouseholderQr().solve(b);
   double cu = x(0);  // circle center in 2D (relative to raw centroid)
   double cv = x(1);
-  Eigen::Vector2d center(cu, cv);
+  // center = Eigen::Vector2d(cu, cv);
 
   for (int iter = 0; iter < 20; ++iter) {
     Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
