@@ -833,10 +833,18 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   Eigen::Vector3d axis_center = center_guess + correction;
 
   // ===============================================================================
+  // Force offset
+
+  axis_center(0) += 0.01;
+  axis_center(1) -= 0.01;
+
+  // ===============================================================================
+
+  // ===============================================================================
   // Fixed to known height for now
   Eigen::Vector3d true_center = axis_center;
   if (standing)
-    true_center(2) = known_height / 2 + 0.01;
+    true_center(2) = known_height / 2 + 0.005;
   else {
     double min_proj = std::numeric_limits<double>::max();
     double max_proj = -std::numeric_limits<double>::max();

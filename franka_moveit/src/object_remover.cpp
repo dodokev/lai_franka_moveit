@@ -9,7 +9,7 @@ ObjectRemover::ObjectRemover(moveit::planning_interface::PlanningSceneInterface*
     : Node("object_finder"), planning_scene_(ps) {
   
   sub_unfilter_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "/finder_cloud", rclcpp::SensorDataQoS(),
+    "/points_used", rclcpp::SensorDataQoS(),
     std::bind(&ObjectRemover::callback, this, std::placeholders::_1));
   pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
     "/octocloud",
@@ -34,7 +34,7 @@ void ObjectRemover::init()
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::remover(pcl::PointCloud<pcl::PointXYZ>::Ptr current, moveit_msgs::msg::CollisionObject& obj_msg, const std::string& parent) {
-  const double margin = 0.02; // e.g. 0.01
+  const double margin = 0.05; // e.g. 0.01
   pcl::CropBox<pcl::PointXYZ> crop;
   crop.setInputCloud(current);
   crop.setNegative(true);
