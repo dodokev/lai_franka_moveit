@@ -667,46 +667,43 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
     Eigen::Vector3f position(centroid(0), centroid(1), 0.0);
     crop.setTranslation(position);
-    crop.setMin(Eigen::Vector4f(-known_radius * 1.05, -known_radius * 1.05, 0, 1.0));
-    crop.setMax(Eigen::Vector4f( known_radius * 1.05,  known_radius * 1.05, known_height/4, 1.0));
+    crop.setMin(Eigen::Vector4f(-known_radius * 1.35, -known_radius * 1.35, 0, 1.0));
+    crop.setMax(Eigen::Vector4f( known_radius * 1.35,  known_radius * 1.35, known_height * 0.8, 1.0));
 
     crop.filter(*cylinder_cloud);
-
-    // Recompute with lesser point cloud
-    pcl::compute3DCentroid(*cylinder_cloud, centroid);
-    center = Eigen::Vector2d(centroid(0), centroid(1));
-    
+  
     // ================================================================================================================================================================
-    
-    // visualization_msgs::msg::Marker _marker;
-    // _marker.header.frame_id = "world";
-    // _marker.header.stamp = rclcpp::Clock().now();
+    {
+      visualization_msgs::msg::Marker _marker;
+      _marker.header.frame_id = "world";
+      _marker.header.stamp = rclcpp::Clock().now();
+      
+      _marker.ns = "centroid";
+      _marker.id = 0;
+      _marker.type = visualization_msgs::msg::Marker::SPHERE;
+      _marker.action = visualization_msgs::msg::Marker::ADD;
 
-    // _marker.ns = "centroid";
-    // _marker.id = 0;
-    // _marker.type = visualization_msgs::msg::Marker::SPHERE;
-    // _marker.action = visualization_msgs::msg::Marker::ADD;
+      // Position = your centroid
+      _marker.pose.position.x = centroid(0);
+      _marker.pose.position.y = centroid(1);
+      _marker.pose.position.z = 0.01;
 
-    // // Position = your centroid
-    // _marker.pose.position.x = 0.01;
-    // _marker.pose.position.y = 0.01;
-    // _marker.pose.position.z = 0.01;
+      // No rotation needed
+      _marker.pose.orientation.w = 1.0;
+      
+      // Size of the sphere
+      _marker.scale.x = 0.01;
+      _marker.scale.y = 0.01;
+      _marker.scale.z = 0.01;
+      
+      // Color (red here)
+      _marker.color.r = 1.0;
+      _marker.color.g = 0.0;
+      _marker.color.b = 0.0;
+      _marker.color.a = 1.0;
 
-    // // No rotation needed
-    // _marker.pose.orientation.w = 1.0;
-
-    // // Size of the sphere
-    // _marker.scale.x = 0.02;
-    // _marker.scale.y = 0.02;
-    // _marker.scale.z = 0.02;
-
-    // // Color (red here)
-    // _marker.color.r = 1.0;
-    // _marker.color.g = 0.0;
-    // _marker.color.b = 0.0;
-    // _marker.color.a = 1.0;
-
-    // pub_centroid_->publish(_marker);
+      pub_centroid_->publish(_marker);
+    }
   }
   // --------------------------------------------------------------------------------
 
@@ -717,7 +714,7 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   Eigen::Vector4f centroid4;
   pcl::compute3DCentroid(*cylinder_cloud, centroid4);
-  Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
+  // Eigen::Vector3d centroid = centroid4.head<3>().cast<double>();
 
   Eigen::Vector3d abs_z = height_axis.cwiseAbs();
   Eigen::Vector3d ref;
@@ -730,66 +727,66 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
 
   Eigen::Vector3d x_axis = (ref - ref.dot(height_axis) * height_axis).normalized();
   Eigen::Vector3d y_axis = height_axis.cross(x_axis).normalized();
+ 
+  // Compute normals
+  pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+  pcl::search::KdTree<pcl::PointXYZ>::Ptr tree(new pcl::search::KdTree<pcl::PointXYZ>);
 
-  // std::vector<Eigen::Vector3d> raw_pts;
-  // for (const auto& tmp : cylinder_cloud->points)
-  //   raw_pts.push_back(Eigen::Vector3d(tmp.x, tmp.y, tmp.z));
-  
-  // double step = 0.01;
-  // while (step > 1e-5)
-  // {
-  //     bool improved = false;
-  //     double best = computeError(center, raw_pts);
+  pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
 
-  //     static const Eigen::Vector2d dirs[] = {
-  //         {1,0}, {-1,0},
-  //         {0,1}, {0,-1},
-  //         {1,1}, {1,-1},
-  //         {-1,1}, {-1,-1}
-  //     };
+  ne.setInputCloud(cylinder_cloud);
+  ne.setSearchMethod(tree);
+  ne.setKSearch(30);
+  ne.compute(*normals);
 
-  //     for (auto dir : dirs)
-  //     {
-  //         Eigen::Vector2d candidate = center + step * dir.normalized();
-  //         double err = computeError(candidate, raw_pts);
+  Eigen::Vector3d center_guess = Eigen::Vector3d::Zero();
+  int count = 0;
+  for(size_t i=0; i < cylinder_cloud->size(); i++)
+  {
+      Eigen::Vector3d p(
+        cylinder_cloud->points[i].x,
+        cylinder_cloud->points[i].y,
+        cylinder_cloud->points[i].z);
 
-  //         if (err < best)
-  //         {
-  //             best = err;
-  //             center = candidate;
-  //             improved = true;
-  //         }
-  //     }
 
-  //     if (!improved)
-  //         step *= 0.5;
-  // }
-  
-  int N = cylinder_cloud->size();
-  Eigen::MatrixXd A(N, 3);
-  Eigen::VectorXd b(N);
-
-  for (int i = 0; i < N; ++i) {
-    // Eigen::Vector3d p(obj_cloud->points[i].x, obj_cloud->points[i].y, obj_cloud->points[i].z);
-    Eigen::Vector3d p(cylinder_cloud->points[i].x, cylinder_cloud->points[i].y,
-                      cylinder_cloud->points[i].z);
-
-    Eigen::Vector3d dp = p - centroid;
-    double u = dp.dot(x_axis);
-    double v = dp.dot(y_axis);
-
-    A(i, 0) = 2.0 * u;
-    A(i, 1) = 2.0 * v;
-    A(i, 2) = -1.0;
-    b(i) = u * u + v * v;
+      Eigen::Vector3d n(
+        normals->points[i].normal_x,
+        normals->points[i].normal_y,
+        normals->points[i].normal_z);
+      
+      center_guess += p - known_radius*n;
+      count++;
   }
 
-  Eigen::Vector3d x = A.colPivHouseholderQr().solve(b);
-  double cu = x(0);  // circle center in 2D (relative to raw centroid)
-  double cv = x(1);
-  // center = Eigen::Vector2d(cu, cv);
+  center_guess /= count;
+  center = Eigen::Vector2d(center_guess.dot(x_axis), center_guess.dot(y_axis));
 
-  for (int iter = 0; iter < 20; ++iter) {
+  // int N = cylinder_cloud->size();
+  // Eigen::MatrixXd A(N, 3);
+  // Eigen::VectorXd b(N);
+
+  // for (int i = 0; i < N; ++i) {
+  //   // Eigen::Vector3d p(obj_cloud->points[i].x, obj_cloud->points[i].y, obj_cloud->points[i].z);
+  //   Eigen::Vector3d p(cylinder_cloud->points[i].x, cylinder_cloud->points[i].y,
+  //                     cylinder_cloud->points[i].z);
+
+  //   Eigen::Vector3d dp = p - centroid;
+  //   double u = dp.dot(x_axis);
+  //   double v = dp.dot(y_axis);
+
+  //   A(i, 0) = 2.0 * u;
+  //   A(i, 1) = 2.0 * v;
+  //   A(i, 2) = -1.0;
+  //   b(i) = u * u + v * v;
+  // }
+
+  // Eigen::Vector3d x = A.colPivHouseholderQr().solve(b);
+  // double cu = x(0);  // circle center in 2D (relative to raw centroid)
+  // double cv = x(1);
+  // // center = Eigen::Vector2d(cu, cv);
+
+  double cu, cv;
+  for (int iter = 0; iter < 10; ++iter) {
     Eigen::Matrix2d H = Eigen::Matrix2d::Zero();
     Eigen::Vector2d g = Eigen::Vector2d::Zero();
 
@@ -797,9 +794,9 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     for (const auto& pt : *cylinder_cloud) {
       Eigen::Vector3d p3(pt.x, pt.y, pt.z);
 
-      Eigen::Vector3d dp = p3 - centroid;
+      Eigen::Vector3d dp = p3 - center_guess;
 
-      Eigen::Vector2d p(dp.dot(x_axis), dp.dot(y_axis) - 0.01);
+      Eigen::Vector2d p(dp.dot(x_axis), dp.dot(y_axis));
 
       Eigen::Vector2d d = center - p;
       double dist = d.norm();
@@ -817,6 +814,10 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
       if (a > delta)
         w = delta / a;
 
+      // Cauchy
+      // double sigma = 0.01; // 1 cm
+      // double w = 1.0 / (1.0 + (r*r)/(sigma*sigma));
+
       H += w * J * J.transpose();
       g += w * J * r;
     }
@@ -828,8 +829,8 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
   cv = center.y();
 
   Eigen::Vector3d correction = cu * x_axis + cv * y_axis;
-  Eigen::Vector3d axis_center = centroid + 1.0 * correction;
-  // Eigen::Vector3d axis_center = Eigen::Vector3d(center(0), center(1), 0);
+  // Eigen::Vector3d axis_center = centroid + 1.0 * correction;
+  Eigen::Vector3d axis_center = center_guess + correction;
 
   // ===============================================================================
   // Fixed to known height for now
@@ -1137,7 +1138,6 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
       // Pose computation part
 
       if (!object_cloud_->points.empty()) {
-        // RCLCPP_WARN(LOGGER, "pose compute");
         Eigen::Affine3d current_pose = centroidBias(object_cloud_, dim, type);
         if (!objects_[n_object].have_stable[counter]) {
           objects_[n_object].have_stable[counter] = true;
@@ -1170,7 +1170,7 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
               objects_[n_object].have_candidate[counter] = false;
             }
 
-            if (objects_[n_object].confidences[counter] >= 10) {
+            if (objects_[n_object].confidences[counter] >= 3) {
               // RCLCPP_WARN(LOGGER, "enough Condifnde");
               objects_[n_object].confidences[counter] = 0;
               objects_[n_object].poses[counter] = poseMean(candidate_pose, current_pose);
