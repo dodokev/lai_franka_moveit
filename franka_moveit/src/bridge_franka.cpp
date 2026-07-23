@@ -39,8 +39,8 @@ void BridgeFranka::callback()
 {
     if (!pose_traj.empty())
     {
-        pub_->publish(pose_traj.front());
-        pose_traj.erase(pose_traj.begin());
+        pub_->publish(pose_traj.front());       // Send a waypoint to the custom controller
+        pose_traj.erase(pose_traj.begin());     // Remove it from the trajectory
     }
 }
 
@@ -52,6 +52,10 @@ bool BridgeFranka::frankaLoop()
 
     rclcpp::Time start_time = shared_from_this()->get_clock()->now();
 
+    // For each waypoint, get the robot State.
+    //   Compute the transform from the base to the end link used by the robot arm
+    //   Create a pose message and attribute the corresponding values
+    //   Add to the trajectory vector
     for (std::size_t i = 0; i < rt.getWayPointCount(); i++)
     {
         geometry_msgs::msg::PoseStamped tmp;

@@ -3,11 +3,6 @@
 static auto const LOGGER = rclcpp::get_logger("octomap_generator");
 using namespace std::chrono_literals;
 
-/**
- * USE PLANNING SCENE COLLISION SHAPE TO REMOVE THE ATTACHED OBJECT FROM POINT CLOUD
- * SHOULD STILL USE OBJECT FINDER ? MAYBE BUT NEED REFINING TO RELIABLE
- */
-
 OctomapGenerator::OctomapGenerator()
     : Node("octomap_generator")
 {
@@ -32,6 +27,7 @@ void OctomapGenerator::cloudCallback(const sensor_msgs::msg::PointCloud2::Shared
 
     last_time_ = this->now();
 
+    // Reattribute in the map the new points
     for (auto &pt : cloud.points)
     {
         auto key = voxelKey(pt);
@@ -49,8 +45,10 @@ void OctomapGenerator::removeOld()
 {
     for (auto it = map_.begin(); it != map_.end();)
     {
+        // Check if last seen time is the current time 
         if (it->second.last_seen != last_time_)
         {
+            // Erase in the map
             it = map_.erase(it);
             continue;
         }
@@ -66,6 +64,8 @@ void OctomapGenerator::decayStep()
     {
         double age = (now - it->second.last_seen).seconds();
 
+        // Modify the occupancy for aging
+        //   if occupancy <= 0.1 : remove the voxel from map
         if (age > decay_time_)
         {
             it->second.occupancy -= decay_rate_;
@@ -92,28 +92,16 @@ std::shared_ptr<octomap::OcTree> OctomapGenerator::buildOctree()
         if (v.occupancy < 0.3)
             continue;
 
-        // convert voxel index → world coordinate
+        // Convert voxel index -> world coordinate
         double x = (k.x + 0.5) * resolution_;
         double y = (k.y + 0.5) * resolution_;
         double z = (k.z + 0.5) * resolution_;
 
+        // updateNode of the tree with the voxelKey of the map
         tree->updateNode(octomap::point3d(x, y, z), true);
     }
 
-    // if (map_.empty())
-    // {
-    //     // RCLCPP_INFO(LOGGER, "Empty not empty ...");
-    //     tree->updateNode(octomap::point3d(0, 0, -1), true);
-    // }
-
-    /**
-     * HOW THE FUCK, IT 17 NODES !
-     */
-
-    // RCLCPP_WARN(LOGGER, "Points in map : %ld", map_.size());
-    // RCLCPP_WARN(LOGGER, "Points in Octree : %ld", tree->calcNumNodes());
     tree->updateInnerOccupancy();
-
     return tree;
 }
 
@@ -133,6 +121,7 @@ octomap_msgs::msg::Octomap OctomapGenerator::toMsg(std::shared_ptr<octomap::OcTr
 
 void OctomapGenerator::publishOctomap(std::shared_ptr<octomap::OcTree> tree)
 {
+    // Publish to the planning scene to update octomap
     moveit_msgs::msg::PlanningScene ps;
     ps.is_diff = true;
 
@@ -152,8 +141,8 @@ void OctomapGenerator::publishOctomap(std::shared_ptr<octomap::OcTree> tree)
 void OctomapGenerator::updateOctomap()
 {
     decayStep();
-    auto tree = buildOctree(); // rebuild from current state
-    publishOctomap(tree);      // replace MoveIt map
+    auto tree = buildOctree();
+    publishOctomap(tree);
 }
 
 int main(int argc, char **argv)

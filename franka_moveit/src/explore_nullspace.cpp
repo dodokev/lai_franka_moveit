@@ -12,6 +12,9 @@
 
 #include "franka_moveit/utils.hpp"
 
+/**
+ * Realized a path finding with nullspace exploration
+ */
 int main(int argc, char *argv[])
 {
   rclcpp::init(argc, argv);
@@ -28,8 +31,7 @@ int main(int argc, char *argv[])
 
   rclcpp::executors::MultiThreadedExecutor executor;
   executor.add_node(node);
-  auto spinner = std::thread([&executor]()
-                             { executor.spin(); });
+  auto spinner = std::thread([&executor](){ executor.spin(); });
 
   const std::string plannerGroup = "fr3_arm";
   const std::string ee = "fr3_hand_tcp";
@@ -52,33 +54,32 @@ int main(int argc, char *argv[])
   moveit_visual_tools.deleteAllMarkers();
   moveit_visual_tools.loadRemoteControl();
 
-  // ================================================================================
-  // ================================================================================
+  // ================================================================================================================================================================
 
   auto current_pose = move_group.getCurrentPose().pose;
   geometry_msgs::msg::Pose start_pose;
   start_pose = current_pose;
-
+  
+  // ----- Remove this if not usage in simulation, can be changed otherwise
   start_pose.position.x += 0.20;
   start_pose.position.z -= 0.40;
-
-  geometry_msgs::msg::Pose second_pose;
-
+  
   bool foundIK = robot_state->setFromIK(joint_model, start_pose);
   if (!foundIK)
-    RCLCPP_ERROR(LOGGER, "Not joint configuration found");
+  RCLCPP_ERROR(LOGGER, "Not joint configuration found");
   else
   {
     move_group.setStartState(*robot_state);
     RCLCPP_INFO(LOGGER, "Start pose done");
   }
-
+  
   Eigen::VectorXd start_joint;
   robot_state->copyJointGroupPositions(joint_model, start_joint);
-
+  
   moveit_visual_tools.publishRobotState(*robot_state);
   moveit_visual_tools.trigger();
-
+  // -----
+  
   // Set a target Pose
   geometry_msgs::msg::Pose target_pose;
   target_pose = start_pose;
@@ -87,8 +88,8 @@ int main(int argc, char *argv[])
 
   move_group.setPoseTarget(target_pose);
 
-  // ================================================================================
-  // ================================================================================
+  // ================================================================================================================================================================
+  // === Nullspace exploration ===
 
   Eigen::VectorXd joints_positions;
   robot_state->copyJointGroupPositions(joint_model, joints_positions);
@@ -120,6 +121,7 @@ int main(int argc, char *argv[])
   {
     ++iter;
 
+    // Plan one time by turn
     pathFound = move_group.plan(plan) == moveit::core::MoveItErrorCode::SUCCESS;
     if (pathFound)
     {
@@ -127,48 +129,63 @@ int main(int argc, char *argv[])
       ++counter;
       continue;
     }
-
-    // --------------------------------------------------------------------------------
-
+    
+    // Get the jacobian
     Eigen::Vector3d ref_pt(0.0, 0.0, 0.0);
     Eigen::MatrixXd jacobian;
     robot_state->getJacobian(joint_model, robot_state->getLinkModel(joint_model->getLinkModelNames().back()), ref_pt, jacobian);
 
+    // Compute the inverse jacobian
     Eigen::MatrixXd J_pinv = eig_pinv(jacobian, 0.01, 0.001);
+
+    /**
+     *  Formula to compute the next configuration :
+     *    dp = inv(J) * K * e + N * dq_o
+     */ 
+
+    // Compute the term N
     auto N = Eigen::MatrixXd::Identity(7, 7) - J_pinv * jacobian;
 
+    // Compute the orientation (quaternion)
     auto current_tf = robot_state->getGlobalLinkTransform(ee);
     Eigen::Quaterniond tmp_quat(current_tf.rotation());
     Eigen::Vector3d current_quat(tmp_quat.x(), tmp_quat.y(), tmp_quat.z());
 
+    // Compute the error between the start pose and the current pose
     Eigen::Vector3d pos_err = start_p - current_tf.translation();
     Eigen::Vector3d quat_err = (start_pose.orientation.w * -current_quat) + (tmp_quat.w() * start_quat) + start_quat.cross(current_quat);
 
     err.head<3>() = pos_err;
     err.tail<3>() = quat_err;
 
+    // Compute dq with K = 0.3
     auto dq = J_pinv * (0.3 * err) + N * dq_o;
+    // Compute the joints position for the timestep
     joints_positions += Ts * dq;
 
+    // Set the new state configuration
     robot_state->setJointGroupPositions(joint_model, joints_positions);
 
+    // Check the joints position bound
     if (!robot_state->satisfiesBounds(joint_model))
     {
       RCLCPP_INFO(LOGGER, "%d", iter);
+      // Reset the position of the robot to the start
       robot_state->setJointGroupPositions(joint_model, start_joint);
       joints_positions = start_joint;
 
+      // Inverse the direction of the exploration
       dq_o = -dq_o;
     }
 
+    // Set the new state of the move group
     move_group.setStartState(*robot_state);
 
     robot_state->update();
     moveit_visual_tools.publishRobotState(*robot_state);
     moveit_visual_tools.trigger();
     rclcpp::sleep_for(std::chrono::milliseconds(10));
-
-  } while (iter < maxPath && !pathFound);
+  } while (iter < maxPath && !pathFound); // Repeat until found path or exhaust of iteration
 
   RCLCPP_INFO(LOGGER, "Error position : %f meter(s)", err.head<3>().norm());
   RCLCPP_INFO_STREAM(LOGGER, "Error quaternion : \n"
@@ -176,11 +193,8 @@ int main(int argc, char *argv[])
 
   RCLCPP_INFO(LOGGER, "Nb waypoints OMPL : %ld", plan.trajectory_.joint_trajectory.points.size());
 
-  // ================================================================================
-  // auto joints = plan.trajectory_.joint_trajectory;
-  // auto points = joints.points;
-
-  // ================================================================================
+  // ================================================================================================================================================================
+  // === Visualization of found path ===
 
   moveit_visual_tools.publishTrajectoryLine(plan.trajectory_, joint_model);
   robot_trajectory::RobotTrajectory rt(move_group.getRobotModel(), plannerGroup);
@@ -188,10 +202,8 @@ int main(int argc, char *argv[])
   publishTcpTrajectory(rt, ee, marker_pub);
   moveit_visual_tools.trigger();
 
-  // ================================================================================
-
-  // ================================================================================
-  // Compute new plans
+  // ================================================================================================================================================================
+  // === Compute path from start to success configuration, recompute path from new configuration to target pose ===
 
   // moveit::planning_interface::MoveGroupInterface::Plan from_old2new;
 
@@ -225,8 +237,8 @@ int main(int argc, char *argv[])
   //   pathFound = move_group.plan(replan) == moveit::core::MoveItErrorCode::SUCCESS;
   // } while (!pathFound);
 
-  // ================================================================================
-  // Draw Path
+  // ================================================================================================================================================================
+  // === Draw the full path ===
 
   // moveit_visual_tools.publishTrajectoryLine(from_old2new.trajectory_, joint_model);
   // moveit_visual_tools.trigger();
@@ -237,16 +249,16 @@ int main(int argc, char *argv[])
   // publishTcpTrajectory(rt, ee, marker_pub);
   // moveit_visual_tools.trigger();
 
-  // ================================================================================
-  // Execution
+  // ================================================================================================================================================================
+  // === Execute trajectory ===
   
   // moveit_visual_tools.prompt("Next to go from Start State to New State");
   // move_group.execute(from_old2new);
   // moveit_visual_tools.prompt("Next to go to the Target Pose");
   // move_group.execute(replan);
 
-  // ================================================================================
-  
+  // ================================================================================================================================================================
+    
   RCLCPP_INFO(LOGGER, "RCLCPP SHUTDOWN ...");
 
   rclcpp::shutdown();

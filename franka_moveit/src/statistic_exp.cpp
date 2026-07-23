@@ -44,7 +44,7 @@ bool dataComputation(robot_trajectory::RobotTrajectory& rt_,
   const moveit::core::JointModelGroup* jmg_,
   double& cartesian_dist, Eigen::VectorXd& joint_dist)
 {
-  // Just to be sure
+  // Compute the cartesian distance and the joint distance along a trajectory
   cartesian_dist = 0;
 
   unsigned int nb_active_joint = jmg_->getActiveVariableCount();
@@ -207,6 +207,9 @@ void runPlanner(unsigned int nb_runs_, moveit::planning_interface::MoveGroupInte
   std::vector<double>* t_cart_dist_, std::vector<double>* t_Tjoint_dist_,
   std::vector<double>* t_time_, std::vector<unsigned int>* t_success_)
 {
+  // Planned nb_runs_ times, and add into the parameters vectors
+  //   t_cart_dist_, t_Tjoint_dist_, t_time_, t_success_
+
   moveit::planning_interface::MoveGroupInterface::Plan plan;
   moveit::core::RobotStatePtr robot_state = mg_->getCurrentState();
 
@@ -247,6 +250,7 @@ void runAllPlanner(unsigned int nb_runs_, std::vector<std::string>* t_plannerId_
   std::vector<double>* t_cart_dist_, std::vector<double>* t_Tjoint_dist_,
   std::vector<double>* t_time_, std::vector<unsigned int>* t_success_)
 {
+  // For each planner Ids
   for (std::size_t i = 0; i < t_plannerId_->size(); i++)
   {
     mg_->setPlannerId(t_plannerId_->at(i));
@@ -261,6 +265,7 @@ void runExperiment(unsigned int nb_runs_, std::vector<geometry_msgs::msg::Pose>*
   std::vector<double>* t_cart_dist_, std::vector<double>* t_Tjoint_dist_,
   std::vector<double>* t_time_, std::vector<unsigned int>* t_success_)
 {
+  // For each target points
   for (std::size_t i = 0; i < t_pts_->size(); i++)
   {
     mg_->setPoseTarget(t_pts_->at(i));
@@ -295,24 +300,15 @@ int main(int argc, char * argv[])
   const moveit::core::JointModelGroup *joint_model = robot_state->getJointModelGroup(plannerGroup);
 
   namespace rvt = rviz_visual_tools;
-  auto moveit_visual_tools = moveit_visual_tools::MoveItVisualTools{node, "panda_link0", rviz_visual_tools::RVIZ_MARKER_TOPIC, move_group.getRobotModel()};
+  auto moveit_visual_tools = moveit_visual_tools::MoveItVisualTools{node, "fr3_link0", rviz_visual_tools::RVIZ_MARKER_TOPIC, move_group.getRobotModel()};
   moveit_visual_tools.deleteAllMarkers();
   moveit_visual_tools.loadRemoteControl();
 
-  // ================================================================================
+  // ================================================================================================================================================================
   
   geometry_msgs::msg::Pose start_pose;
   start_pose = move_group.getCurrentPose().pose;
   move_group.setStartStateToCurrentState();
-
-  // start_pose.position.x = 0.3071037828922272;
-  // start_pose.position.y = -0.141447052359581;
-  // start_pose.position.z = 0.4798051714897156;
-  
-  // start_pose.orientation.x = 0.9999999403953552;
-  // start_pose.orientation.y = 0.0003082542971242219;
-  // start_pose.orientation.z = -7.609510066686198e-05;
-  // start_pose.orientation.w = -1.9570914446376264e-05;
   
   bool foundIK = robot_state->setFromIK(joint_model, start_pose);
   if (!foundIK)
@@ -324,8 +320,8 @@ int main(int argc, char * argv[])
     RCLCPP_INFO(LOGGER, "Start pose done ...");
   }
 
-  // ================================================================================
-  
+  // ==================================================================================================================================================================================
+  // === Create pose and attribute values ===
   // geometry_msgs::msg::Pose p1, p2, p3, p4, p5;
   // p1 = start_pose;
   // p2 = start_pose;
@@ -380,12 +376,14 @@ int main(int argc, char * argv[])
   // tab_pts.push_back(p4);
   // tab_pts.push_back(p5);
   
-  // ================================================================================
-  
+  // ================================================================================================================================================================
+  // For now test only for the OMPL pipeline
+
   move_group.setPlanningTime(10.0);
   move_group.setNumPlanningAttempts(10);
   move_group.setPlanningPipelineId("ompl");
   
+  // Set different planning algorithm
   std::vector<std::string> tab_plannerId;
   tab_plannerId.push_back("RRTConnectkConfigDefault");
   tab_plannerId.push_back("KPIECEkConfigDefault");

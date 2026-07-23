@@ -24,13 +24,10 @@ ObjectFinder::ObjectFinder()
       std::bind(&ObjectFinder::filter_callback, this, std::placeholders::_1));
   pub_filtered_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/finder_cloud",
                                                                         rclcpp::SensorDataQoS());
-  pub_test_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/test_cloud", rclcpp::SensorDataQoS());
-  
+ 
   sub_size_ = this->create_subscription<std_msgs::msg::String>(
       "/add_lost_obj", rclcpp::SensorDataQoS(),
       std::bind(&ObjectFinder::request_callback, this, std::placeholders::_1));
-
-  result_cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
 
   table_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
   cloud_ = std::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
@@ -127,12 +124,12 @@ bool ObjectFinder::retreiveObject() {
   /**
    * Save table information
    */
-  table_coeff_ = Eigen::Vector4d(_coefficients->values[0], _coefficients->values[1], _coefficients->values[2], _coefficients->values[3]);
   table_normal_ =Eigen::Vector3d(_coefficients->values[0], _coefficients->values[1], _coefficients->values[2]).normalized();
   if (table_normal_.z() < 0)
     table_normal_ = -table_normal_;  // point "up"
   table_d_ = _coefficients->values[3];
-  // table_d_ = 0.0;
+
+  RCLCPP_WARN(LOGGER, "Table d : %f", table_d_);
 
   _extract.setNegative(true);
   _extract.filter(*cluster_cloud_);
@@ -581,42 +578,6 @@ Eigen::Affine3d ObjectFinder::centroidBiasBox(pcl::PointCloud<pcl::PointXYZ>::Pt
   return pose;
 }
 
-double ObjectFinder::computeError(const Eigen::Vector2d& center,
-                    const std::vector<Eigen::Vector3d>& pts)
-{
-  double mean = 0.0;
-
-  double a = table_coeff_(0);
-  double b = table_coeff_(1);
-  double c = table_coeff_(2);
-  double d = table_coeff_(3);
-
-  double norm = table_normal_.squaredNorm();
-  std::vector<Eigen::Vector2d> proj_pts;
-
-  for (auto& pt : pts)
-  {
-    float dist = (a * pt(0) + b * pt(1) + c * pt(2) + d) / norm;
-    Eigen::Vector3d p_proj = pt - dist * table_normal_;
-    
-    Eigen::Vector2d proj2d(p_proj.x(), p_proj.y());
-
-    proj_pts.push_back(proj2d);
-    mean += (proj2d - center).norm();
-  }
-
-  mean /= pts.size();
-
-  double error = 0.0;
-  for (const auto& p : proj_pts)
-  {
-    double d = (p - center).norm();
-    error += (d - mean) * (d - mean);
-  }
-
-  return error;
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ>::Ptr obj_cloud,
                                                    const std::vector<double>& dim) {
@@ -706,11 +667,6 @@ Eigen::Affine3d ObjectFinder::centroidBiasCylinder(pcl::PointCloud<pcl::PointXYZ
     }
   }
   // --------------------------------------------------------------------------------
-
-  sensor_msgs::msg::PointCloud2 _output;
-  pcl::toROSMsg(*cylinder_cloud, _output);
-  _output.header.frame_id = "world";
-  pub_test_->publish(_output);
 
   Eigen::Vector4f centroid4;
   pcl::compute3DCentroid(*cylinder_cloud, centroid4);
@@ -1094,7 +1050,6 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
   }
 
   // ── Assignment: greedily match each object instance to its best cluster ──
-  result_cloud_->clear();
   std::size_t nb_cluster = cluster_indices_.size();
   std::size_t flat_offset = 0;  // running offset into the flattened object-instance axis
 
@@ -1189,8 +1144,6 @@ void ObjectFinder::filter_callback(const sensor_msgs::msg::PointCloud2::SharedPt
         }
       }
       // =====================================================================================================
-
-      *result_cloud_ += *object_cloud_;
     }
 
     flat_offset += number;

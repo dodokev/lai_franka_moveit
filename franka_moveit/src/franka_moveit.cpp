@@ -13,9 +13,11 @@
 
 #include "franka_moveit/utils.hpp"
 
+/**
+ * Node to manipulate the robot through subscription
+ */
 int main(int argc, char * argv[])
 {
-  // Initialize ROS and create the Node
   rclcpp::init(argc, argv);
 
   auto const node = std::make_shared<rclcpp::Node>(
@@ -46,6 +48,7 @@ int main(int argc, char * argv[])
   move_group.setPlanningPipelineId("ompl");
   move_group.setPlannerId("RRTConnectkConfigDefault");
    
+  // Target pose subscription
   auto goal_sub = node->create_subscription<geometry_msgs::msg::Pose>("target_pose", 10,
     [&move_group](geometry_msgs::msg::Pose p)
     {
@@ -61,12 +64,14 @@ int main(int argc, char * argv[])
   moveit_visual_tools.deleteAllMarkers();
   moveit_visual_tools.loadRemoteControl();
 
+  // Run planning subscription
   auto plan_sub = node->create_subscription<std_msgs::msg::Empty>("start_planning", 10,
     [&move_group, robot_state, &plan, &moveit_visual_tools, &marker_pub, &plannerGroup](std_msgs::msg::Empty){ 
       move_group.setStartStateToCurrentState();
       
       bool pathFound = false;
       unsigned int iter = 0;
+      // Plan until exhaust or path found
       do
       {
         ++iter;

@@ -38,6 +38,7 @@ OutlierFilter::OutlierFilter()
 
 void OutlierFilter::planeFitting(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
 {
+    // Do a plane fitting, then extract the plane and object
     pcl::SACSegmentation<pcl::PointXYZ> _seg;
     _seg.setOptimizeCoefficients(true);
     _seg.setModelType(pcl::SACMODEL_PLANE);
@@ -71,6 +72,7 @@ void OutlierFilter::planeFitting(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
     Eigen::Vector3f n(a, b, c);
     float norm_sq = n.squaredNorm();
 
+    // Project the inlier into the plane fit, to avoid having a wavy table
     for (auto& pt : table_->points)
     {
         Eigen::Vector3f p(pt.x, pt.y, pt.z);
@@ -87,6 +89,7 @@ void OutlierFilter::planeFitting(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud)
     vg_.setInputCloud(tmp_cld);
     vg_.filter(*table_);
 
+    // Lower all the table point by a resolution
     for (auto& pt : table_->points)
         pt.z -= 0.0225;
 }
@@ -99,6 +102,7 @@ void OutlierFilter::filter_callback(const sensor_msgs::msg::PointCloud2::SharedP
     if (cloud_->points.empty())
         return;
 
+    // First crop the cloud from the outside workspace
     pass_Xaxis.setInputCloud(cloud_);
     pass_Xaxis.filter(*cropped_Xaxis);
 
@@ -109,20 +113,20 @@ void OutlierFilter::filter_callback(const sensor_msgs::msg::PointCloud2::SharedP
     pass_Zaxis.filter(*cropped_Zaxis);
 
     planeFitting(cropped_Zaxis);
-    // *object_ += *table_;
 
+    // Downgraded the point cloud with a voxel grid
     vg_.setInputCloud(object_);
-    // vg_.setInputCloud(cropped_Zaxis);
     vg_.filter(*downsampled_);
 
     tree_->setInputCloud(downsampled_);
 
+    // Extract the cluster of the object cloud, and remove little cluster
     ec_.setSearchMethod(tree_);
     ec_.setInputCloud(downsampled_);
     ec_.extract(cluster_indices_);
     
-    // ================================================================================
-    
+    // ================================================================================================================================================================
+    // Lower the points and regroups the clusters in a filtered cloud
     pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>);
 
     for (const auto& indices : cluster_indices_)
@@ -142,16 +146,15 @@ void OutlierFilter::filter_callback(const sensor_msgs::msg::PointCloud2::SharedP
 
     filtered->is_dense = true;
 
-    // ================================================================================
-
-    // RCLCPP_INFO(LOGGER, "SIZE : %ld", filtered->points.size());
-
+    // ================================================================================================================================================================
+    // Convert the pcl cloud to a sensor message
     sensor_msgs::msg::PointCloud2 output;
     pcl::toROSMsg(*filtered, output);
     output.header = cloud_msg->header;
     
     pub_filtered->publish(output);
     
+    // Clear used member
     cluster_indices_.clear();
     filtered->clear();
 }

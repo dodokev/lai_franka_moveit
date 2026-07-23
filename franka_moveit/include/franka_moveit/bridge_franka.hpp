@@ -12,24 +12,32 @@
 
 #include "franka_moveit_msg/srv/set_trajectory.hpp"
 
+/**
+ * Node for converting a moveit trajectory, and send it to a custom controller.
+ */
 class BridgeFranka : public rclcpp::Node
 {
 private:
-    /* data */
     moveit::core::RobotModelPtr robot_model_;
     moveit::core::RobotStatePtr robot_state_;
 
+    // Moveit trajectory
     moveit_msgs::msg::RobotTrajectory traj;
 
+    // Waypoint publisher
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_;
+    // Moveit trajectory server
     rclcpp::Service<franka_moveit_msg::srv::SetTrajectory>::SharedPtr service_;
+
+    // TimerBase for sending waypoints to the custom controller
     rclcpp::TimerBase::SharedPtr timer_;
 
+    // Vector of waypoints
     std::vector<geometry_msgs::msg::PoseStamped> pose_traj;
 
     void callback();
 public:
-    BridgeFranka(/* args */);
+    BridgeFranka();
     ~BridgeFranka() = default;
 
     void init();
@@ -37,5 +45,6 @@ public:
         const std::shared_ptr<franka_moveit_msg::srv::SetTrajectory::Request> request,
         std::shared_ptr<franka_moveit_msg::srv::SetTrajectory::Response> response);
 
+    // Function to convert the moveit (state) trajectory to 6d waypoint
     bool frankaLoop();
 };

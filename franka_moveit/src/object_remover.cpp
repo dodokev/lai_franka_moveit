@@ -41,8 +41,11 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::remover(pcl::PointCloud<pcl::
   
   const auto& pose = obj_msg.pose;
   Eigen::Vector3f position(pose.position.x, pose.position.y, pose.position.z);
+  // Convert the orientation of the message to a tf2::Quaternion
   tf2::Quaternion tf_q(pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w);
 
+  // If the object is attached, compute the transform between the base and the parent
+  //   Then add the pose of the attached object
   if (parent != "")
   {
     moveit::core::RobotStatePtr current_state =
@@ -80,16 +83,17 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::remover(pcl::PointCloud<pcl::
       quat.y(),
       quat.z(),
       quat.w());
-
-    // RCLCPP_WARN_STREAM(LOGGER, "Position :" << position);
   }
+
 
   crop.setTranslation(position);
 
   double roll, pitch, yaw;
+  // Get roll, pitch and yaw from the transformation
   tf2::Matrix3x3(tf_q).getRPY(roll, pitch, yaw);
   crop.setRotation(Eigen::Vector3f(roll, pitch, yaw));
 
+  // Set the minimum and maximun of the cropBox with the known dimensions
   if(obj_msg.primitives[0].type == shape_msgs::msg::SolidPrimitive::BOX)
   {
     double sx = obj_msg.primitives[0].dimensions[0];
@@ -109,136 +113,15 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::remover(pcl::PointCloud<pcl::
     crop.setMax(Eigen::Vector4f( r + margin,  r + margin,  h/2 + margin, 1.0));
   }
   
+  // Return the new cloud point
   pcl::PointCloud<pcl::PointXYZ>::Ptr next(new pcl::PointCloud<pcl::PointXYZ>);
   crop.filter(*next);
   return next;
 }
 
-bool ObjectRemover::pointInsideBox(
-    const pcl::PointXYZ& p,
-    const shape_msgs::msg::SolidPrimitive& primitive,
-    const geometry_msgs::msg::Pose& pose)
-{
-    Eigen::Vector3d point(p.x,p.y,p.z);
-
-    Eigen::Quaterniond q(
-        pose.orientation.w,
-        pose.orientation.x,
-        pose.orientation.y,
-        pose.orientation.z
-    );
-
-    Eigen::Vector3d local =
-        q.inverse() *
-        (point - Eigen::Vector3d(
-            pose.position.x,
-            pose.position.y,
-            pose.position.z));
-
-
-    double dx = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_X] / 2.0;
-    double dy = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Y] / 2.0;
-    double dz = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Z] / 2.0;
-
-
-    return 
-        std::abs(local.x()) < dx &&
-        std::abs(local.y()) < dy &&
-        std::abs(local.z()) < dz;
-}
-
-bool ObjectRemover::pointInsideCylinder(
-    const pcl::PointXYZ& p,
-    const shape_msgs::msg::SolidPrimitive& primitive,
-    const geometry_msgs::msg::Pose& pose)
-{
-  Eigen::Vector3d point(p.x,p.y,p.z);
-
-    Eigen::Quaterniond q(
-        pose.orientation.w,
-        pose.orientation.x,
-        pose.orientation.y,
-        pose.orientation.z
-    );
-
-    Eigen::Vector3d local =
-        q.inverse() *
-        (point - Eigen::Vector3d(
-            pose.position.x,
-            pose.position.y,
-            pose.position.z));
-
-
-    double dz = primitive.dimensions[shape_msgs::msg::SolidPrimitive::CYLINDER_HEIGHT] / 2.0;
-    double r = primitive.dimensions[shape_msgs::msg::SolidPrimitive::CYLINDER_RADIUS];
-
-    double r2 = local(0) * local(0) + local(1) * local(1);
-
-    return 
-        (r2 <= r*r) &&
-        (std::abs(local.z()) < dz);
-}
-
-bool ObjectRemover::pointInsideCollisionObject(
-    const pcl::PointXYZ& p,
-    const moveit_msgs::msg::CollisionObject& obj, const std::string& parent)
-{
-    if(obj.primitives.empty())
-        return false;
-
-    geometry_msgs::msg::Pose pose = obj.pose;
-
-    if (parent != "")
-    {
-      moveit::core::RobotStatePtr current_state =
-      planning_scene_monitor_->getStateMonitor()->getCurrentState();
-
-      if (current_state) {
-          robot_state_ = std::make_shared<moveit::core::RobotState>(*current_state);
-          robot_state_->update();
-      }
-
-      const Eigen::Isometry3d& tf_w_h = robot_state_->getGlobalLinkTransform(parent);
-      Eigen::Isometry3d tf_h_o = Eigen::Isometry3d::Identity();
-
-      tf_h_o.linear() = Eigen::Quaterniond(
-        pose.orientation.w,
-        pose.orientation.x,
-        pose.orientation.y,
-        pose.orientation.z
-      ).toRotationMatrix();
-
-      tf_h_o.translation() << pose.position.x,
-                          pose.position.y,
-                          pose.position.z;
-
-      Eigen::Isometry3d tf_w_o = tf_w_h * tf_h_o;
-
-      pose.position.x = tf_w_o.translation().x();
-      pose.position.y = tf_w_o.translation().y();
-      pose.position.z = tf_w_o.translation().z();
-
-      Eigen::Quaterniond quat(tf_w_o.rotation());
-
-      pose.orientation.x = quat.x();
-      pose.orientation.y = quat.y();
-      pose.orientation.z = quat.z();
-      pose.orientation.w = quat.w();
-    }
-
-    if (obj.primitives[0].dimensions.size() == 3)
-      if(pointInsideBox(p, obj.primitives[0], pose))
-        return true;
-
-    if (obj.primitives[0].dimensions.size() == 2)
-      if(pointInsideCylinder(p, obj.primitives[0], pose))
-        return true;
-
-    return false;
-}
-
 pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCloud<pcl::PointXYZ>::Ptr current, moveit_msgs::msg::CollisionObject& obj_msg, const std::string& parent)
 {
+  // Separate the table of objects
   pcl::SACSegmentation<pcl::PointXYZ> _seg;
   _seg.setOptimizeCoefficients(true);
   _seg.setModelType(pcl::SACMODEL_PLANE);
@@ -281,6 +164,10 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCl
   pcl::PointCloud<pcl::PointXYZ>::Ptr filtered(new pcl::PointCloud<pcl::PointXYZ>);
   // RCLCPP_INFO(LOGGER, "Start remove cluster");
 
+  // For each cluster, and each indices :
+  //   Check if it inside the collision object :
+  //     true -> break of the indices
+  //     false -> add cluster to the filtered cloud
   for (const auto& indices : cluster_indices)
   {
     bool collision = false;
@@ -311,6 +198,137 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr ObjectRemover::removerByCluster(pcl::PointCl
   return filtered;
 }
 
+bool ObjectRemover::pointInsideBox(
+    const pcl::PointXYZ& p,
+    const shape_msgs::msg::SolidPrimitive& primitive,
+    const geometry_msgs::msg::Pose& pose)
+{
+    Eigen::Vector3d point(p.x,p.y,p.z);
+
+    Eigen::Quaterniond q(
+        pose.orientation.w,
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z
+    );
+
+    // Compute the point position in the local frame (object frame)
+    Eigen::Vector3d local =
+        q.inverse() *
+        (point - Eigen::Vector3d(
+            pose.position.x,
+            pose.position.y,
+            pose.position.z));
+
+
+    double dx = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_X] / 2.0;
+    double dy = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Y] / 2.0;
+    double dz = primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Z] / 2.0;
+
+    // Check if the point is inside boundaries
+    return 
+        std::abs(local.x()) < dx &&
+        std::abs(local.y()) < dy &&
+        std::abs(local.z()) < dz;
+}
+
+bool ObjectRemover::pointInsideCylinder(
+    const pcl::PointXYZ& p,
+    const shape_msgs::msg::SolidPrimitive& primitive,
+    const geometry_msgs::msg::Pose& pose)
+{
+  Eigen::Vector3d point(p.x,p.y,p.z);
+
+    Eigen::Quaterniond q(
+        pose.orientation.w,
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z
+    );
+
+    // Compute the point position in the local frame (object frame)
+    Eigen::Vector3d local =
+        q.inverse() *
+        (point - Eigen::Vector3d(
+            pose.position.x,
+            pose.position.y,
+            pose.position.z));
+
+
+    double dz = primitive.dimensions[shape_msgs::msg::SolidPrimitive::CYLINDER_HEIGHT] / 2.0;
+    double r = primitive.dimensions[shape_msgs::msg::SolidPrimitive::CYLINDER_RADIUS];
+
+    // Compute the radius of the point [(x - h)^2 + (y - k)^2 = r^2]
+    //   (h, k) = (0, 0)
+    double r2 = local(0) * local(0) + local(1) * local(1);
+
+    // Check if the point is inside boundaries
+    return 
+        (r2 <= r*r) &&
+        (std::abs(local.z()) < dz);
+}
+
+bool ObjectRemover::pointInsideCollisionObject(
+    const pcl::PointXYZ& p,
+    const moveit_msgs::msg::CollisionObject& obj, const std::string& parent)
+{
+    if(obj.primitives.empty())
+        return false;
+
+    // Get the pose object
+    geometry_msgs::msg::Pose pose = obj.pose;
+
+    // If the object is attached, compute the transform between the base and the parent
+    //   Then add the pose of the attached object
+    if (parent != "")
+    {
+      moveit::core::RobotStatePtr current_state = planning_scene_monitor_->getStateMonitor()->getCurrentState();
+
+      if (current_state) {
+          robot_state_ = std::make_shared<moveit::core::RobotState>(*current_state);
+          robot_state_->update();
+      }
+
+      const Eigen::Isometry3d& tf_w_h = robot_state_->getGlobalLinkTransform(parent);
+      Eigen::Isometry3d tf_h_o = Eigen::Isometry3d::Identity();
+
+      tf_h_o.linear() = Eigen::Quaterniond(
+        pose.orientation.w,
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z
+      ).toRotationMatrix();
+
+      tf_h_o.translation() << pose.position.x,
+                          pose.position.y,
+                          pose.position.z;
+
+      Eigen::Isometry3d tf_w_o = tf_w_h * tf_h_o;
+
+      pose.position.x = tf_w_o.translation().x();
+      pose.position.y = tf_w_o.translation().y();
+      pose.position.z = tf_w_o.translation().z();
+
+      Eigen::Quaterniond quat(tf_w_o.rotation());
+
+      pose.orientation.x = quat.x();
+      pose.orientation.y = quat.y();
+      pose.orientation.z = quat.z();
+      pose.orientation.w = quat.w();
+    }
+
+    // Check if the point is inside the object
+    if (obj.primitives[0].dimensions.size() == 3) // Box
+      if(pointInsideBox(p, obj.primitives[0], pose))
+        return true;
+
+    if (obj.primitives[0].dimensions.size() == 2) // Cylinder
+      if(pointInsideCylinder(p, obj.primitives[0], pose))
+        return true;
+
+    return false;
+}
+
 
 void ObjectRemover::callback(const sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg) {
   RCLCPP_DEBUG(LOGGER, "Received point cloud");
@@ -320,6 +338,7 @@ void ObjectRemover::callback(const sensor_msgs::msg::PointCloud2::SharedPtr clou
 
   pcl::PointCloud<pcl::PointXYZ>::Ptr current(new pcl::PointCloud<pcl::PointXYZ>(*cloud));
   
+  // Get the collision objects map
   auto object_map = planning_scene_->getObjects();
   // RCLCPP_INFO(LOGGER, "Start remover");
   for (auto& obj : object_map)
@@ -329,12 +348,16 @@ void ObjectRemover::callback(const sensor_msgs::msg::PointCloud2::SharedPtr clou
     std::string tmp_id = obj_msg.id;
     std::remove_if(tmp_id.begin(), tmp_id.end(), [](unsigned char c){return std::isdigit(c);});
     
+    // Ignore removing if the object : 
+    //   is static (object not in the camera view)
+    //   doesn't have primitive
     if (tmp_id == "static") continue;
     if (obj_msg.primitives.empty()) continue;
     current = removerByCluster(current, obj_msg);
     current = remover(current, obj_msg);
   }
 
+  // Get the attached objects map
   auto attached_map = planning_scene_->getAttachedObjects();
   for (auto& obj : attached_map)
   {
@@ -342,11 +365,14 @@ void ObjectRemover::callback(const sensor_msgs::msg::PointCloud2::SharedPtr clou
     auto& obj_msg = att_msg.object;
     // RCLCPP_WARN(LOGGER, "Who : %s", obj_msg.id.c_str());
     // RCLCPP_WARN(LOGGER, "By : %s", att_msg.link_name.c_str());
+
+    // Ignore if it doesn't have primitive
     if (obj_msg.primitives.empty()) continue;
     current = removerByCluster(current, obj_msg, att_msg.link_name);
     current = remover(current, obj_msg, att_msg.link_name);
   }
 
+  // Publish the result cloud
   sensor_msgs::msg::PointCloud2 output;
   pcl::toROSMsg(*current, output);
   output.header = cloud_msg->header;

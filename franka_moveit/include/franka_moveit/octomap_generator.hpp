@@ -17,12 +17,14 @@
 #include <octomap_msgs/conversions.h>
 #include <moveit_msgs/msg/planning_scene.hpp>
 
+// Voxel occupancy and last time of apparition
 struct VoxelInfo
 {
     float occupancy;        // probability or log odds
     rclcpp::Time last_seen; // last observation time
 };
 
+// Voxel 3d position
 struct VoxelKey
 {
     int x;
@@ -46,16 +48,25 @@ struct VoxelHash
     }
 };
 
+/**
+ * From a point cloud, generate a voxel map to construct an octomap
+ */
 class OctomapGenerator : public rclcpp::Node
 {
 private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr sub_;
     rclcpp::Publisher<moveit_msgs::msg::PlanningScene>::SharedPtr planning_scene_pub_;
+
+    // TimerBase to update the octomap
     rclcpp::TimerBase::SharedPtr timer_;
 
-    void cloudCallback(sensor_msgs::msg::PointCloud2::SharedPtr msg);
+    // Function to update the octomap
     void updateOctomap();
+    
+    void cloudCallback(sensor_msgs::msg::PointCloud2::SharedPtr msg);
+    // Time based voxel removal
     void decayStep();
+    // Subscription instant removal
     void removeOld();
 
     double decay_time_ = 2.0;
@@ -65,6 +76,7 @@ private:
 
     std::unordered_map<VoxelKey, VoxelInfo, VoxelHash> map_;
 
+    // Function to create a voxelKey from a pcl point
     VoxelKey voxelKey(const pcl::PointXYZ &pt)
     {
         return VoxelKey{
@@ -73,15 +85,9 @@ private:
             static_cast<int>(std::floor(pt.z / resolution_))};
     }
 
-    pcl::PointXYZ voxelCenter(const VoxelKey &k)
-    {
-        return pcl::PointXYZ{
-            (k.x + 0.5f) * resolution_,
-            (k.y + 0.5f) * resolution_,
-            (k.z + 0.5f) * resolution_};
-    }
-
+    // Build an OcTree from the voxel map
     std::shared_ptr<octomap::OcTree> buildOctree();
+    // Convert a octomap to a message
     octomap_msgs::msg::Octomap toMsg(std::shared_ptr<octomap::OcTree> tree);
     void publishOctomap(std::shared_ptr<octomap::OcTree> tree);
     

@@ -24,6 +24,7 @@ void CloudToWorld::callback(const sensor_msgs::msg::PointCloud2 msg)
     RCLCPP_DEBUG(LOGGER, "Cloud get");
     try
     {
+        // Get the transform between the cloud frame and the target frame
         geometry_msgs::msg::TransformStamped transform =
         tf_buffer_.lookupTransform(
             target_frame_,                      // target
@@ -31,9 +32,11 @@ void CloudToWorld::callback(const sensor_msgs::msg::PointCloud2 msg)
             rclcpp::Time(0));
             //msg.header.stamp);           // timestamp
 
+        // Apply the transform to the point cloud
         sensor_msgs::msg::PointCloud2 cloud_out;
         tf2::doTransform(msg, cloud_out, transform);
 
+        // Modify the header and publish the point cloud
         cloud_out.header.frame_id = target_frame_;
         pub_->publish(cloud_out);
         RCLCPP_DEBUG(LOGGER, "Publish");

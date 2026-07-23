@@ -53,8 +53,7 @@ int main(int argc, char *argv[])
     moveit_visual_tools.deleteAllMarkers();
     moveit_visual_tools.loadRemoteControl();
 
-    // ================================================================================
-    // ================================================================================
+    // ================================================================================================================================================================
 
     auto current_pose = move_group.getCurrentPose().pose;
     geometry_msgs::msg::Pose start_pose;
@@ -66,9 +65,12 @@ int main(int argc, char *argv[])
     geometry_msgs::msg::Pose target_pose;
     target_pose = start_pose;
 
+    // ----------------------------------------------------------------------------------------------------------------------------------------------------------------
+    // --- Change pose value of the target ---
+
     target_pose.position.x += 0.25;
-    // target_pose.position.y = 0.0;
-    // target_pose.position.z = 0.0;
+    // target_pose.position.y += 0.0;
+    // target_pose.position.z += 0.0;
 
     // target_pose.orientation.x = 0.0;
     // target_pose.orientation.y = 0.0;
@@ -78,9 +80,9 @@ int main(int argc, char *argv[])
 
     move_group.setPoseTarget(target_pose);
 
-    // ================================================================================
-    // ================================================================================
-
+    // ================================================================================================================================================================
+    
+    // Planning until path found
     bool pathFound = false;
     unsigned int iter = 0;
     do
@@ -97,7 +99,7 @@ int main(int argc, char *argv[])
     publishTcpTrajectory(rt, ee, marker_pub);
     moveit_visual_tools.trigger();
     
-    // ==================================================================================================
+    // ====================================================================================================================================================================================================
     // -- SERVICE TO SEND CARTESIAN TRAJECTORY TO CUSTOM CONTROLLER --
     rclcpp::Client<franka_moveit_msg::srv::SetTrajectory>::SharedPtr client =
         node->create_client<franka_moveit_msg::srv::SetTrajectory>("robot_traj");
@@ -126,8 +128,9 @@ int main(int argc, char *argv[])
             break;
         }
     }
-    // ==================================================================================================
-    
+    // ====================================================================================================================================================================================================
+    // Execute with moveit controller
+
     // moveit_visual_tools.prompt("Press next to execute the trajectory");
     // move_group.execute(plan);
                     

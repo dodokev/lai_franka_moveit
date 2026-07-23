@@ -2,6 +2,13 @@
 #include <moveit/robot_trajectory/robot_trajectory.h>
 #include <moveit/robot_state/robot_state.h>
 
+/**
+ * File containing some useful functions
+ */
+
+/**
+ * Draw in rviz2 the trajectory of a given link through a given publisher
+ */
 void publishTcpTrajectory(
     const robot_trajectory::RobotTrajectory &trajectory,
     const std::string &tcp_link,
@@ -44,6 +51,9 @@ void publishTcpTrajectory(
     pub->publish(marker);
 }
 
+/**
+ * Compute the damping
+ */
 double cosRialzato(double sigma, double lambda, double threshold)
 {
   double tmp, reg;
@@ -67,6 +77,9 @@ double cosRialzato(double sigma, double lambda, double threshold)
   return reg;
 }
 
+/**
+ * Compute the inverse of the Jacobian
+ */
 Eigen::MatrixXd eig_pinv(Eigen::MatrixXd J, double threshold, double lambda)
 {
 
@@ -89,7 +102,7 @@ Eigen::MatrixXd eig_pinv(Eigen::MatrixXd J, double threshold, double lambda)
   Sinv.setZero();
   for (int i = 0; i < rowJ; i++)
   {
-
+    // Add a damping if necessary 
     p(i) = cosRialzato(eigValues(i), lambda, threshold);
 
     Sinv(i, i) = eigValues(i) / (std::pow(eigValues(i), 2) + p(i));
