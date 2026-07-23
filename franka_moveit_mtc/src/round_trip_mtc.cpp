@@ -66,7 +66,7 @@ private:
     void addCurrentStage();
     void addHomeStage();
     void returnHome();
-    void addLiftStage(double min, double max);
+    void addFreeingStage(double min, double max);
 
     bool sendRequest(bool req);
 
@@ -178,12 +178,12 @@ MTCTaskNode::MTCTaskNode(const rclcpp::NodeOptions& options)
     boost::split(_param_split, tmp_second_pose, boost::is_any_of(","));
     second_pose_ = {std::stod(_param_split[0]), std::stod(_param_split[1])};
 
-    while (!client_->wait_for_service(1s)) {
-    if (!rclcpp::ok()) {
-        RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
-    }
-    RCLCPP_INFO(LOGGER, "service not available, waiting again...");
-    }
+    // while (!client_->wait_for_service(1s)) {
+    // if (!rclcpp::ok()) {
+    //     RCLCPP_ERROR(LOGGER, "Interrupted while waiting for the service. Exiting.");
+    // }
+    // RCLCPP_INFO(LOGGER, "service not available, waiting again...");
+    // }
 }
 
 rclcpp::node_interfaces::NodeBaseInterface::SharedPtr MTCTaskNode::getNodeBaseInterface() {
@@ -244,7 +244,7 @@ bool MTCTaskNode::setupObjectInformation(std::string& object_name) {
         x_ = dimension_[2];
     }
 
-    sendRequest(true);
+    // sendRequest(true);
     setupObjectPose(object_name);
     return true;
 }
@@ -364,7 +364,6 @@ void MTCTaskNode::addCurrentStage() {
     task_.setProperty("group", arm_group_name_);
     task_.setProperty("eef", hand_group_name_);
     task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
 
     auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
     current_state_ptr_ = stage_state_current.get();
@@ -381,7 +380,6 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
     task_.setProperty("group", arm_group_name_);
     task_.setProperty("eef", hand_group_name_);
     task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
 
     if (!task_.getRobotModel()) {
         RCLCPP_ERROR(LOGGER, "Robot model not loaded");
@@ -408,7 +406,7 @@ void MTCTaskNode::createPickTask(std::string& object_name) {
             mtc::stages::Connect::GroupPlannerVector{{arm_group_name_, multipipeline_planner_}});
         stage->properties().configureInitFrom(mtc::Stage::PARENT);
         stage->setTimeout(10.0);
-        stage->setPathConstraints(constraints_);
+        // stage->setPathConstraints(constraints_);
 
         auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2pick", std::move(stage));
         wrapper->setPredicate(clearance_predicate);
@@ -571,7 +569,6 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
     task_.setProperty("group", arm_group_name_);
     task_.setProperty("eef", hand_group_name_);
     task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
 
     auto clearance_predicate = makeClearancePredicate();
 
@@ -585,7 +582,7 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
             mtc::stages::Connect::GroupPlannerVector{{arm_group_name_, multipipeline_planner_}});
         stage_move_to_place->properties().configureInitFrom(mtc::Stage::PARENT);
         stage_move_to_place->setTimeout(10.0);
-        stage_move_to_place->setPathConstraints(constraints_);
+        // stage_move_to_place->setPathConstraints(constraints_);
 
         auto wrapper = std::make_unique<mtc::stages::PredicateFilter>("move2place",
                                                                     std::move(stage_move_to_place));
@@ -681,25 +678,47 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
     task_.add(std::move(serial));
 }
 
-void MTCTaskNode::addLiftStage(double min, double max) {
+void MTCTaskNode::addFreeingStage(double min, double max) {
     task_.setRobotModel(model_);
 
     task_.setProperty("group", arm_group_name_);
     task_.setProperty("eef", hand_group_name_);
     task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
 
-    auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
-    stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-    stage->setMinMaxDistance(min, max);
-    stage->setIKFrame(hand_frame_);
-    stage->properties().set("marker_ns", "lift");
 
-    geometry_msgs::msg::Vector3Stamped vec;
-    vec.header.frame_id = "world";
-    vec.vector.z = 1.0;
-    stage->setDirection(vec);
-    task_.add(std::move(stage));
+    auto alternate = std::make_unique<mtc::Alternatives>("pickOrientation");
+    task_.properties().exposeTo(alternate->properties(), {"eef", "group", "ik_frame"});
+    alternate->properties().configureInitFrom(mtc::Stage::PARENT, {"eef", "group", "ik_frame"});
+    
+    {
+        auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
+        stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+        stage->setMinMaxDistance(min, max);
+        stage->setIKFrame(hand_frame_);
+        stage->properties().set("marker_ns", "lift");
+        
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = "world";
+        vec.vector.z = 1.0;
+        stage->setDirection(vec);
+        alternate->add(std::move(stage));
+    }
+
+    {
+        auto stage = std::make_unique<mtc::stages::MoveRelative>("moveObject hand_frame", cartesian_planner_);
+        stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+        stage->setMinMaxDistance(min, max);
+        stage->setIKFrame(hand_frame_);
+        stage->properties().set("marker_ns", "lift");
+        
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = hand_frame_;
+        vec.vector.z = -1.0;
+        stage->setDirection(vec);
+        alternate->add(std::move(stage));
+    }
+
+    task_.add(std::move(alternate));
 }
 
 void MTCTaskNode::addHomeStage() {
@@ -708,7 +727,6 @@ void MTCTaskNode::addHomeStage() {
     task_.setProperty("group", arm_group_name_);
     task_.setProperty("eef", hand_group_name_);
     task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
 
     {
         auto stage = std::make_unique<mtc::stages::MoveTo>("returnHome", multipipeline_planner_);
@@ -734,7 +752,6 @@ void MTCTaskNode::returnHome() {
     task_.setProperty("group", arm_group_name_);
     task_.setProperty("eef", hand_group_name_);
     task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
 
     {
         auto stage = std::make_unique<mtc::stages::MoveTo>("returnHome", multipipeline_planner_);
@@ -773,10 +790,10 @@ void MTCTaskNode::fillTask(std::string& object_name, geometry_msgs::msg::PoseSta
     if (stage_failed_ == "PickTask" || stage_failed_ == "pickObject" || stage_failed_ == "") {
         grasped_ = false;
         createPickTask(object_name);
-        addLiftStage(0.05, 0.15);
+        addFreeingStage(0.05, 0.15);
         createPlaceTask(object_name, attach_stage_ptr_, place);
     } else if (stage_failed_ == "liftObject") {
-        addLiftStage(0.05, 0.15);
+        addFreeingStage(0.05, 0.15);
         createPlaceTask(object_name, current_state_ptr_, place);
     } else if (stage_failed_ == "PlaceTask") {
         createPlaceTask(object_name, current_state_ptr_, place);
@@ -839,8 +856,8 @@ bool MTCTaskNode::executeTask() {
         stage_failed_ = c->name();
         RCLCPP_WARN(LOGGER, "Stage executing : %s", stage_failed_.c_str());
 
-        if (stage_failed_ == "pickObject")
-          sendRequest(false);
+        // if (stage_failed_ == "pickObject")
+        //   sendRequest(false);
 
         // ===============================================================================================================
         // --- Execution Code ---
@@ -853,8 +870,8 @@ bool MTCTaskNode::executeTask() {
         }
         // ===============================================================================================================
 
-        if (stage_failed_ == "PlaceTask")
-          sendRequest(true);
+        // if (stage_failed_ == "PlaceTask")
+        //   sendRequest(true);
         if (stage_failed_ == "pickObject")
         grasped_ = true;
     }

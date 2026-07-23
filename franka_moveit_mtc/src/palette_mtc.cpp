@@ -65,7 +65,7 @@ private:
 
     void addCurrentStage();
     void returnHome();
-    void addLiftStage(double min, double max);
+    void addFreeingStage(double min, double max);
 
     bool sendRequest(bool req);
 
@@ -724,25 +724,47 @@ void MTCTaskNode::createPlaceTask(std::string& object_name, mtc::Stage* monitore
     task_.add(std::move(serial));
 }
 
-void MTCTaskNode::addLiftStage(double min, double max) {
+void MTCTaskNode::addFreeingStage(double min, double max) {
     task_.setRobotModel(model_);
 
     task_.setProperty("group", arm_group_name_);
     task_.setProperty("eef", hand_group_name_);
     task_.setProperty("ik_frame", hand_frame_);
-    task_.setProperty("path_constraints", constraints_);
 
-    auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
-    stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-    stage->setMinMaxDistance(min, max);
-    stage->setIKFrame(hand_frame_);
-    stage->properties().set("marker_ns", "lift");
 
-    geometry_msgs::msg::Vector3Stamped vec;
-    vec.header.frame_id = "world";
-    vec.vector.z = 1.0;
-    stage->setDirection(vec);
-    task_.add(std::move(stage));
+    auto alternate = std::make_unique<mtc::Alternatives>("pickOrientation");
+    task_.properties().exposeTo(alternate->properties(), {"eef", "group", "ik_frame"});
+    alternate->properties().configureInitFrom(mtc::Stage::PARENT, {"eef", "group", "ik_frame"});
+    
+    {
+        auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
+        stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+        stage->setMinMaxDistance(min, max);
+        stage->setIKFrame(hand_frame_);
+        stage->properties().set("marker_ns", "lift");
+        
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = "world";
+        vec.vector.z = 1.0;
+        stage->setDirection(vec);
+        alternate->add(std::move(stage));
+    }
+
+    {
+        auto stage = std::make_unique<mtc::stages::MoveRelative>("moveObject hand_frame", cartesian_planner_);
+        stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+        stage->setMinMaxDistance(min, max);
+        stage->setIKFrame(hand_frame_);
+        stage->properties().set("marker_ns", "lift");
+        
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = hand_frame_;
+        vec.vector.z = -1.0;
+        stage->setDirection(vec);
+        alternate->add(std::move(stage));
+    }
+
+    task_.add(std::move(alternate));
 }
 
 void MTCTaskNode::returnHome() {
@@ -793,10 +815,10 @@ void MTCTaskNode::fillTask(std::string& object_name, geometry_msgs::msg::PoseSta
     if (stage_failed_ == "PickTask" || stage_failed_ == "pickObject" || stage_failed_ == "") {
         grasped_ = false;
         createPickTask(object_name);
-        addLiftStage(0.05, 0.15);
+        addFreeingStage(0.05, 0.15);
         createPlaceTask(object_name, attach_stage_ptr_, place);
     } else if (stage_failed_ == "liftObject") {
-        addLiftStage(0.05, 0.15);
+        addFreeingStage(0.05, 0.15);
         createPlaceTask(object_name, current_state_ptr_, place);
     } else if (stage_failed_ == "PlaceTask") {
         createPlaceTask(object_name, current_state_ptr_, place);

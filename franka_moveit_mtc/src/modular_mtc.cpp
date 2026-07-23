@@ -65,7 +65,7 @@ private:
 
   void addCurrentStage();
   void addAttachStage(std::string object_name);
-  void addLiftStage(double min, double max);
+  void addFreeingStage(double min, double max);
 
   bool sendRequest(bool req);
 
@@ -249,16 +249,10 @@ bool MTCTaskNode::setupPlanner() {
   rrtconnect_planner->setMaxAccelerationScalingFactor(0.1);
   rrtconnect_planner->setPlannerId("RRTConnectkConfigDefault");
 
-  auto lin_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "pilz_industrial_motion_planner");
-  lin_planner->setMaxVelocityScalingFactor(0.1);
-  lin_planner->setMaxAccelerationScalingFactor(0.1);
-  lin_planner->setPlannerId("LIN");
-
   multipipeline_planner_ = std::make_shared<mtc::solvers::MultiPlanner>();
-  // multipipeline_planner_->push_back(task_planner);
-  // multipipeline_planner_->push_back(lin_planner);
-  multipipeline_planner_->push_back(rrtstar_planner);
+  multipipeline_planner_->push_back(task_planner);
   multipipeline_planner_->push_back(rrtconnect_planner);
+  // multipipeline_planner_->push_back(rrtstar_planner);
 
   interpolation_planner_ = std::make_shared<mtc::solvers::JointInterpolationPlanner>();
 
@@ -335,7 +329,6 @@ void MTCTaskNode::addCurrentStage() {
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
-  task_.setProperty("path_constraints", constraints_);
 
   auto stage_state_current = std::make_unique<mtc::stages::CurrentState>("current");
   current_state_ptr_ = stage_state_current.get();
@@ -348,7 +341,6 @@ void MTCTaskNode::createPickTask() {
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
-  task_.setProperty("path_constraints", constraints_);
 
   if (!task_.getRobotModel()) {
     RCLCPP_ERROR(LOGGER, "Robot model not loaded");
@@ -542,7 +534,6 @@ void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
-  task_.setProperty("path_constraints", constraints_);
 
   auto clearance_predicate = makeClearancePredicate();
 
@@ -670,26 +661,47 @@ void MTCTaskNode::createPlaceTask(mtc::Stage* monitored) {
   task_.add(std::move(serial));
 }
 
-void MTCTaskNode::addLiftStage(double min, double max)
-{
-  task_.setRobotModel(model_);
+void MTCTaskNode::addFreeingStage(double min, double max) {
+    task_.setRobotModel(model_);
 
-  task_.setProperty("group", arm_group_name_);
-  task_.setProperty("eef", hand_group_name_);
-  task_.setProperty("ik_frame", hand_frame_);
-  task_.setProperty("path_constraints", constraints_);
+    task_.setProperty("group", arm_group_name_);
+    task_.setProperty("eef", hand_group_name_);
+    task_.setProperty("ik_frame", hand_frame_);
 
-  auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
-  stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
-  stage->setMinMaxDistance(min, max);
-  stage->setIKFrame(hand_frame_);
-  stage->properties().set("marker_ns", "lift");
 
-  geometry_msgs::msg::Vector3Stamped vec;
-  vec.header.frame_id = "world";
-  vec.vector.z = 1.0;
-  stage->setDirection(vec);
-  task_.add(std::move(stage));
+    auto alternate = std::make_unique<mtc::Alternatives>("pickOrientation");
+    task_.properties().exposeTo(alternate->properties(), {"eef", "group", "ik_frame"});
+    alternate->properties().configureInitFrom(mtc::Stage::PARENT, {"eef", "group", "ik_frame"});
+    
+    {
+        auto stage = std::make_unique<mtc::stages::MoveRelative>("liftObject", cartesian_planner_);
+        stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+        stage->setMinMaxDistance(min, max);
+        stage->setIKFrame(hand_frame_);
+        stage->properties().set("marker_ns", "lift");
+        
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = "world";
+        vec.vector.z = 1.0;
+        stage->setDirection(vec);
+        alternate->add(std::move(stage));
+    }
+
+    {
+        auto stage = std::make_unique<mtc::stages::MoveRelative>("moveObject hand_frame", cartesian_planner_);
+        stage->properties().configureInitFrom(mtc::Stage::PARENT, {"group"});
+        stage->setMinMaxDistance(min, max);
+        stage->setIKFrame(hand_frame_);
+        stage->properties().set("marker_ns", "lift");
+        
+        geometry_msgs::msg::Vector3Stamped vec;
+        vec.header.frame_id = hand_frame_;
+        vec.vector.z = -1.0;
+        stage->setDirection(vec);
+        alternate->add(std::move(stage));
+    }
+
+    task_.add(std::move(alternate));
 }
 
 void MTCTaskNode::addAttachStage(std::string object_name)
@@ -699,7 +711,6 @@ void MTCTaskNode::addAttachStage(std::string object_name)
   task_.setProperty("group", arm_group_name_);
   task_.setProperty("eef", hand_group_name_);
   task_.setProperty("ik_frame", hand_frame_);
-  task_.setProperty("path_constraints", constraints_);
 
   {
     auto stage = std::make_unique<mtc::stages::ModifyPlanningScene>("attachObject");
@@ -715,12 +726,12 @@ void MTCTaskNode::fillTask()
   if (stage_failed_ == "PickTask" || stage_failed_ == "" || stage_failed_ == "pickObject") {
     grasped_ = false;
     createPickTask();
-    addLiftStage(0.05, 0.15);
+    addFreeingStage(0.05, 0.15);
     createPlaceTask(attach_stage_ptr_);
   }
   else if (stage_failed_ == "liftObject")
   {
-    addLiftStage(0.05, 0.15);
+    addFreeingStage(0.05, 0.15);
     createPlaceTask(current_state_ptr_);
   }
   else if (stage_failed_ == "PlaceTask") {
@@ -806,11 +817,9 @@ bool MTCTaskNode::executeTask()
 }
 
 bool MTCTaskNode::doTask() {
-  rclcpp::sleep_for(std::chrono::milliseconds(2000));
   setupObjectPose();
   RCLCPP_WARN(LOGGER, "Setup Pose");
-  task_ = mtc::Task();
-  task_.setTimeout(5.0);
+  task_.clear();
 
   RCLCPP_WARN(LOGGER, "FIlling");
   fillTask();
@@ -894,6 +903,7 @@ int main(int argc, char** argv) {
 
   bool value{true};
   do{
+    rclcpp::sleep_for(std::chrono::milliseconds(2000));
     value = mtc_task_node->doTask();
   } while(value);
 
