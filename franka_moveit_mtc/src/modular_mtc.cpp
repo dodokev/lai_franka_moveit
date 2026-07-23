@@ -233,10 +233,10 @@ bool MTCTaskNode::setupPlanner() {
 
   constraints_.orientation_constraints.push_back(oc);
 
-  // auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
-  // task_planner->setMaxVelocityScalingFactor(0.1);
-  // task_planner->setMaxAccelerationScalingFactor(0.1);
-  // task_planner->setTimeout(10.0);
+  auto task_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "task");
+  task_planner->setMaxVelocityScalingFactor(0.1);
+  task_planner->setMaxAccelerationScalingFactor(0.1);
+  task_planner->setTimeout(10.0);
 
   auto rrtstar_planner = std::make_shared<mtc::solvers::PipelinePlanner>(node_, "ompl");
   rrtstar_planner->setMaxVelocityScalingFactor(0.1);
